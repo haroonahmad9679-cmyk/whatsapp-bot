@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Bot Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="dashboard">
+    <div class="sidebar">
+      <h2>Conversations</h2>
+      <ul id="contact-list">
+        <!-- Contacts will load here -->
+      </ul>
+    </div>
+    <div class="chat-area">
+      <div class="chat-header">
+        <h3 id="current-contact">Select a contact</h3>
+      </div>
+      <div class="chat-history" id="chat-history">
+        <!-- Messages will load here -->
+      </div>
+      <div class="chat-input-area">
+        <input type="text" id="manual-message" placeholder="Type a manual message (pauses AI)..." disabled>
+        <button id="send-btn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
