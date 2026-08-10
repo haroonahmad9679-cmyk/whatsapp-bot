@@ -12,14 +12,37 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_super_secret_token';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
 // System prompt for the AI persona
 const systemInstruction = `You are a professional, helpful, and friendly sales assistant for an individual business. 
 Your goal is to answer customer queries accurately, generate sales presence, and be as helpful as possible. 
 You can communicate fluently in any language the customer uses. Keep your answers concise, engaging, and suitable for a WhatsApp conversation (use emojis appropriately).`;
+
+let activeModelName = null;
+
+async function getBestModelName() {
+  if (activeModelName) return activeModelName;
+  try {
+    // Dynamically fetch the list of available models for this specific API key
+    const response = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+    const models = response.data.models;
+    
+    // Find the first model that supports generateContent (preferring flash or pro)
+    let bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent') && m.name.includes('flash'));
+    if (!bestModel) {
+      bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent') && m.name.includes('pro'));
+    }
+    if (!bestModel && models.length > 0) {
+       bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'));
+    }
+    
+    activeModelName = bestModel.name.replace('models/', '');
+    console.log("Dynamically selected Gemini Model:", activeModelName);
+    return activeModelName;
+  } catch (err) {
+    console.error("Failed to fetch models list. Is your API key valid? Error:", err.message);
+    return "gemini-1.5-flash";
+  }
+}
 
 // Webhook verification (GET endpoint)
 app.get('/webhook', (req, res) => {
@@ -52,27 +75,23 @@ app.post('/webhook', async (req, res) => {
       body.entry[0].changes[0].value.messages[0]
     ) {
       const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
-      const from = body.entry[0].changes[0].value.messages[0].from; // sender's phone number
-      const msgBody = body.entry[0].changes[0].value.messages[0].text.body; // text content
+      const from = body.entry[0].changes[0].value.messages[0].from; 
+      const msgBody = body.entry[0].changes[0].value.messages[0].text ? body.entry[0].changes[0].value.messages[0].text.body : "Received a non-text message";
 
       console.log(`Received message: "${msgBody}" from ${from}`);
-
-      // Acknowledge receipt immediately to Meta to prevent timeouts
-      res.sendStatus(200);
+      res.sendStatus(200); // Acknowledge receipt immediately to Meta
 
       try {
-        // 1. Send the message to Gemini AI
         console.log('Thinking...');
+        
+        const modelName = await getBestModelName();
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: modelName });
+
         const chat = model.startChat({
           history: [
-            {
-              role: "user",
-              parts: [{ text: systemInstruction }],
-            },
-            {
-              role: "model",
-              parts: [{ text: "Understood. I will act as the sales assistant." }],
-            },
+            { role: "user", parts: [{ text: systemInstruction }] },
+            { role: "model", parts: [{ text: "Understood." }] },
           ]
         });
         
@@ -80,7 +99,6 @@ app.post('/webhook', async (req, res) => {
         const aiResponse = result.response.text();
         console.log(`AI Response: ${aiResponse}`);
 
-        // 2. Send the AI response back to the user via WhatsApp API
         await axios({
           method: 'POST',
           url: `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
@@ -92,18 +110,14 @@ app.post('/webhook', async (req, res) => {
             messaging_product: 'whatsapp',
             to: from,
             type: 'text',
-            text: {
-              body: aiResponse,
-            },
+            text: { body: aiResponse },
           },
         });
-        
         console.log('Reply sent successfully!');
-
       } catch (error) {
         console.error('Error processing AI response or sending message:', error.message);
       }
-      return; // already sent status 200
+      return; 
     }
     res.sendStatus(200);
   } else {
