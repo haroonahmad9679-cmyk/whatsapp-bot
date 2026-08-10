@@ -116,7 +116,7 @@ app.post('/webhook', async (req, res) => {
 
         await axios({
           method: 'POST',
-          url: `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+          url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
           headers: {
             Authorization: `Bearer ${WHATSAPP_TOKEN}`,
             'Content-Type': 'application/json',
