@@ -155,18 +155,29 @@ app.get('/force-test', async (req, res) => {
   const msgBody = "Hello! Introduce yourself briefly as my new AI assistant.";
   
   try {
-    const modelName = await getBestModelName();
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: modelName });
-    const chat = model.startChat({
-       history: [
-         { role: "user", parts: [{ text: systemInstruction }] },
-         { role: "model", parts: [{ text: "Understood." }] },
-       ]
-    });
-    
-    const result = await chat.sendMessage(msgBody);
-    const aiResponse = result.response.text();
+    const modelsToTry = await getValidModelsList();
+    let aiResponse = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const chat = model.startChat({
+           history: [
+             { role: "user", parts: [{ text: systemInstruction }] },
+             { role: "model", parts: [{ text: "Understood." }] },
+           ]
+        });
+        
+        const result = await chat.sendMessage(msgBody);
+        aiResponse = result.response.text();
+        break; // Stop on success
+      } catch (e) {
+        // Try next model
+      }
+    }
+
+    if (!aiResponse) throw new Error("All AI models failed.");
     
     await axios({
       method: 'POST',
