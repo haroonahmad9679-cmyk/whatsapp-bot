@@ -9,8 +9,16 @@ const path = require('path');
 const app = express();
 app.use(bodyParser.json());
 
-// Serve the frontend dashboard
-app.use('/dashboard', express.static(path.join(__dirname, 'public')));
+// Serve the frontend dashboard (files are in root)
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+app.get('/style.css', (req, res) => {
+  res.sendFile(path.join(__dirname, 'style.css'));
+});
+app.get('/script.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'script.js'));
+});
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_super_secret_token';
