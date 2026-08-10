@@ -12,35 +12,33 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_super_secret_token';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// System prompt for the AI persona
 const systemInstruction = `You are a professional, helpful, and friendly sales assistant for an individual business. 
 Your goal is to answer customer queries accurately, generate sales presence, and be as helpful as possible. 
 You can communicate fluently in any language the customer uses. Keep your answers concise, engaging, and suitable for a WhatsApp conversation (use emojis appropriately).`;
 
-let activeModelName = null;
+let cachedModels = [];
 
-async function getBestModelName() {
-  if (activeModelName) return activeModelName;
+async function getValidModelsList() {
+  if (cachedModels.length > 0) return cachedModels;
   try {
-    // Dynamically fetch the list of available models for this specific API key
     const response = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
     const models = response.data.models;
     
-    // Find the first model that supports generateContent (preferring flash or pro)
-    let bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent') && m.name.includes('flash'));
-    if (!bestModel) {
-      bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent') && m.name.includes('pro'));
-    }
-    if (!bestModel && models.length > 0) {
-       bestModel = models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'));
-    }
+    // Filter for models that support text generation
+    const valid = models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'));
     
-    activeModelName = bestModel.name.replace('models/', '');
-    console.log("Dynamically selected Gemini Model:", activeModelName);
-    return activeModelName;
+    // Extract names and prioritize "flash" models as they are fastest
+    cachedModels = valid.map(m => m.name.replace('models/', '')).sort((a, b) => {
+      if (a.includes('flash') && !b.includes('flash')) return -1;
+      if (!a.includes('flash') && b.includes('flash')) return 1;
+      return 0;
+    });
+    
+    console.log("Found these potential AI models to try:", cachedModels);
+    return cachedModels;
   } catch (err) {
-    console.error("Failed to fetch models list. Is your API key valid? Error:", err.message);
-    return "gemini-1.5-flash";
+    console.error("Failed to fetch models list.", err.message);
+    return ["gemini-1.5-flash", "gemini-pro"]; // basic fallbacks
   }
 }
 
@@ -84,19 +82,36 @@ app.post('/webhook', async (req, res) => {
       try {
         console.log('Thinking...');
         
-        const modelName = await getBestModelName();
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const modelsToTry = await getValidModelsList();
+        let aiResponse = null;
 
-        const chat = model.startChat({
-          history: [
-            { role: "user", parts: [{ text: systemInstruction }] },
-            { role: "model", parts: [{ text: "Understood." }] },
-          ]
-        });
-        
-        const result = await chat.sendMessage(msgBody);
-        const aiResponse = result.response.text();
+        // Try every single model until one works
+        for (const modelName of modelsToTry) {
+          try {
+            console.log(`Attempting to use model: ${modelName}`);
+            const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+            const model = genAI.getGenerativeModel({ model: modelName });
+
+            const chat = model.startChat({
+              history: [
+                { role: "user", parts: [{ text: systemInstruction }] },
+                { role: "model", parts: [{ text: "Understood." }] },
+              ]
+            });
+            
+            const result = await chat.sendMessage(msgBody);
+            aiResponse = result.response.text();
+            console.log(`Success! Working model found: ${modelName}`);
+            break; // Stop looping once we get a successful response
+          } catch (e) {
+            console.log(`Model ${modelName} rejected the request. Trying the next one...`);
+          }
+        }
+
+        if (!aiResponse) {
+          throw new Error("All available Gemini models failed to process the request.");
+        }
+
         console.log(`AI Response: ${aiResponse}`);
 
         await axios({
