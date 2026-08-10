@@ -14,7 +14,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
 // System prompt for the AI persona
 const systemInstruction = `You are a professional, helpful, and friendly sales assistant for an individual business. 
