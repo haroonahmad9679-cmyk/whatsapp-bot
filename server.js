@@ -83,7 +83,7 @@ app.post('/webhook', async (req, res) => {
         // 2. Send the AI response back to the user via WhatsApp API
         await axios({
           method: 'POST',
-          url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+          url: `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
           headers: {
             Authorization: `Bearer ${WHATSAPP_TOKEN}`,
             'Content-Type': 'application/json',
