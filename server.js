@@ -143,6 +143,56 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Force-Test Endpoint to bypass broken inbound webhooks
+app.get('/force-test', async (req, res) => {
+  const targetPhone = req.query.phone;
+  if (!targetPhone) {
+    return res.send("Error: Please add your phone number to the URL like this: /force-test?phone=1234567890 (include country code, no plus sign)");
+  }
+  
+  // Use the Phone Number ID from your Meta screenshot
+  const phoneNumberId = "1162096826996318"; 
+  const msgBody = "Hello! Introduce yourself briefly as my new AI assistant.";
+  
+  try {
+    const modelName = await getBestModelName();
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: modelName });
+    const chat = model.startChat({
+       history: [
+         { role: "user", parts: [{ text: systemInstruction }] },
+         { role: "model", parts: [{ text: "Understood." }] },
+       ]
+    });
+    
+    const result = await chat.sendMessage(msgBody);
+    const aiResponse = result.response.text();
+    
+    await axios({
+      method: 'POST',
+      url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      data: {
+        messaging_product: 'whatsapp',
+        to: targetPhone,
+        type: 'text',
+        text: { body: aiResponse },
+      },
+    });
+    
+    res.send(`<h1>Success!</h1><p>I just forced the AI to send a message to ${targetPhone}. Check your WhatsApp!</p>`);
+  } catch (err) {
+    if (err.response && err.response.data) {
+       res.send(`<h1>Meta API Error</h1><pre>${JSON.stringify(err.response.data, null, 2)}</pre>`);
+    } else {
+       res.send(`<h1>Error</h1><p>${err.message}</p>`);
+    }
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
 });
