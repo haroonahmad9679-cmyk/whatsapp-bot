@@ -131,6 +131,9 @@ app.post('/webhook', async (req, res) => {
         console.log('Reply sent successfully!');
       } catch (error) {
         console.error('Error processing AI response or sending message:', error.message);
+        if (error.response && error.response.data) {
+          console.error('Meta API Error Details:', JSON.stringify(error.response.data, null, 2));
+        }
       }
       return; 
     }
