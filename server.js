@@ -296,13 +296,21 @@ app.post('/webhook', async (req, res) => {
       
       const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
       const from = body.entry[0].changes[0].value.messages[0].from; 
-      const msgBody = body.entry[0].changes[0].value.messages[0].text ? body.entry[0].changes[0].value.messages[0].text.body : "Received a non-text message";
+      const msgObj = body.entry[0].changes[0].value.messages[0];
+      let msgBody = "Received a non-text message";
+      if (msgObj.type === 'text') {
+        msgBody = msgObj.text.body;
+      } else if (msgObj.type === 'interactive' && msgObj.interactive.type === 'button_reply') {
+        msgBody = msgObj.interactive.button_reply.title;
+      }
 
       res.sendStatus(200); 
       logMessage(from, 'inbound', msgBody);
 
       try {
         const sysPrompt = await getSystemPrompt();
+        const finalPrompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: If you want to offer the user clickable buttons (maximum 3), append them to the end of your message in this exact format: [BUTTON: Option 1] [BUTTON: Option 2]. Button text MUST be 20 characters or less.";
+        
         const modelsToTry = await getValidModelsList();
         let aiResponse = null;
 
@@ -312,7 +320,7 @@ app.post('/webhook', async (req, res) => {
             const model = genAI.getGenerativeModel({ model: modelName });
             const chat = model.startChat({
               history: [
-                { role: "user", parts: [{ text: sysPrompt }] },
+                { role: "user", parts: [{ text: finalPrompt }] },
                 { role: "model", parts: [{ text: "Understood." }] },
               ]
             });
@@ -324,11 +332,50 @@ app.post('/webhook', async (req, res) => {
 
         if (!aiResponse) throw new Error("All available Gemini models failed.");
 
+        // Parse buttons from aiResponse
+        const buttons = [];
+        let cleanedResponse = aiResponse;
+        const buttonRegex = /\[BUTTON:\s*(.+?)\]/g;
+        let match;
+        
+        while ((match = buttonRegex.exec(aiResponse)) !== null) {
+          if (buttons.length < 3) {
+            let btnText = match[1].trim().substring(0, 20);
+            buttons.push({
+              type: "reply",
+              reply: { id: "btn_" + buttons.length, title: btnText }
+            });
+          }
+        }
+        
+        cleanedResponse = cleanedResponse.replace(buttonRegex, '').trim();
+        
+        let payloadData;
+        if (buttons.length > 0) {
+          payloadData = {
+            messaging_product: 'whatsapp',
+            to: from,
+            type: 'interactive',
+            interactive: {
+              type: 'button',
+              body: { text: cleanedResponse || "Please select an option:" },
+              action: { buttons: buttons }
+            }
+          };
+        } else {
+          payloadData = {
+            messaging_product: 'whatsapp',
+            to: from,
+            type: 'text',
+            text: { body: cleanedResponse }
+          };
+        }
+
         await axios({
           method: 'POST',
           url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
           headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
-          data: { messaging_product: 'whatsapp', to: from, type: 'text', text: { body: aiResponse } },
+          data: payloadData,
         });
         
         logMessage(from, 'outbound', aiResponse);
