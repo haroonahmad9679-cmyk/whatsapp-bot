@@ -240,6 +240,7 @@ app.post('/webhook', async (req, res) => {
 
         for (const modelName of modelsToTry) {
           try {
+            console.log("TRYING MODEL:", modelName);
             const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
             const model = genAI.getGenerativeModel({ model: modelName });
             
@@ -252,29 +253,38 @@ app.post('/webhook', async (req, res) => {
               ]
             });
             
+            console.log("SENDING MESSAGE TO AI:", msgBody);
             const result = await chat.sendMessage(msgBody);
             const responseData = result.response;
+            console.log("AI RAW RESPONSE:", JSON.stringify(responseData));
             
             // Check if AI decided to call a function
             if (responseData.functionCalls && responseData.functionCalls.length > 0) {
               const call = responseData.functionCalls[0];
+              console.log("AI TRIGGERED FUNCTION:", call.name, "WITH ARGS:", call.args);
+              
               if (call.name === "search_opensooq") {
-                const apiResult = await searchOpenSooq(call.args.query);
+                const apiResult = await searchOpenSooq(call.args.query || msgBody);
+                console.log("SCRAPER RESULT:", apiResult);
                 
                 // Send API result back to Gemini so it can read it and formulate a reply
                 const secondResult = await chat.sendMessage([{
                   functionResponse: {
                     name: "search_opensooq",
-                    response: { data: apiResult }
+                    response: { content: apiResult }
                   }
                 }]);
                 aiResponse = secondResult.response.text();
+              } else {
+                aiResponse = "I got confused and tried to use a tool that doesn't exist: " + call.name;
               }
             } else {
               aiResponse = responseData.text();
             }
             break; 
-          } catch (e) { console.log(e.message); }
+          } catch (e) { 
+             console.log("AI LOOP EXCEPTION:", e.stack || e.message || e);
+          }
         }
 
         if (!aiResponse) throw new Error("All available Gemini models failed.");
