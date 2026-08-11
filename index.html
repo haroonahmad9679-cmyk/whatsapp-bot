@@ -12,7 +12,31 @@
 </head>
 <body>
   
-  <div id="app" class="app">
+  <!-- LOGIN OVERLAY -->
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <div class="sb-logo" style="justify-content: center; margin-bottom: 24px; padding: 0;">
+        <div class="sb-logo-icon-img" style="width: 40px; height: 40px; font-size: 20px;"><i class="fa-solid fa-robot" style="color: #fff;"></i></div>
+        <span class="sb-logo-text" style="font-size: 24px;">Harry Chatbot <span style="color:#3b82f6">Ai</span></span>
+      </div>
+      <h2 style="text-align: center; margin-bottom: 8px;">Welcome Back</h2>
+      <p style="text-align: center; color: #9ca3af; margin-bottom: 24px;">Sign in to manage your AI sales assistant</p>
+      
+      <form id="login-form" class="modern-form">
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="login-email" required placeholder="admin@harry.com">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="login-password" required placeholder="password123">
+        </div>
+        <button type="submit" class="btn-primary" style="width: 100%;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="app" style="display: none;">
     <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="sb-logo">
@@ -167,6 +191,7 @@
                 <tr>
                   <th>Phone Number</th>
                   <th>Name</th>
+                  <th>Lead Score</th>
                   <th>Notes</th>
                   <th>Action</th>
                 </tr>

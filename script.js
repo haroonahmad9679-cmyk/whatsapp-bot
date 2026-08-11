@@ -1,21 +1,66 @@
 /* script.js - Harry Chatbot Ai */
 
-// TAB SWITCHING LOGIC (Handles both Sidebar and Mobile Nav)
+let authToken = localStorage.getItem('harry_bot_token');
+
+// AUTH FLOW
+const loginOverlay = document.getElementById('login-overlay');
+const appContainer = document.getElementById('app');
+
+if (authToken) {
+  loginOverlay.style.display = 'none';
+  appContainer.style.display = 'flex';
+  loadTabData('tab-dashboard');
+}
+
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      authToken = data.token;
+      localStorage.setItem('harry_bot_token', authToken);
+      loginOverlay.style.display = 'none';
+      appContainer.style.display = 'flex';
+      loadTabData('tab-dashboard');
+    } else {
+      alert("Invalid credentials. Try admin@harry.com / password123");
+    }
+  } catch (err) {
+    alert("Login failed.");
+  }
+};
+
+// API WRAPPER TO INJECT JWT
+async function apiFetch(url, options = {}) {
+  if (!authToken) return null;
+  const headers = { ...options.headers, 'Authorization': `Bearer ${authToken}` };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('harry_bot_token');
+    window.location.reload();
+  }
+  return res;
+}
+
+// TAB SWITCHING LOGIC
 document.querySelectorAll('.sb-item, .mn-item').forEach(btn => {
   btn.onclick = () => {
-    // Remove active from all nav items
     document.querySelectorAll('.sb-item, .mn-item').forEach(b => b.classList.remove('active'));
-    // Hide all tab panes
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     
-    // Add active to clicked nav item
     btn.classList.add('active');
-    
-    // Sync sidebar and mobile nav if they share the same data-tab
     const tabId = btn.dataset.tab;
     document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(b => b.classList.add('active'));
     
-    // Show correct tab pane
     const pane = document.getElementById(tabId);
     if(pane) pane.classList.add('active');
     
@@ -34,7 +79,8 @@ function loadTabData(tabId) {
 // TAB 1: DASHBOARD
 async function fetchStats() {
   try {
-    const res = await fetch('/api/stats');
+    const res = await apiFetch('/api/stats');
+    if (!res) return;
     const data = await res.json();
     document.getElementById('stat-messages').textContent = data.total_messages;
     document.getElementById('stat-contacts').textContent = data.total_contacts;
@@ -46,7 +92,8 @@ async function fetchStats() {
 let currentNumber = null;
 async function fetchInboxContacts() {
   try {
-    const res = await fetch('/api/chats');
+    const res = await apiFetch('/api/chats');
+    if (!res) return;
     const contacts = await res.json();
     const list = document.getElementById('contact-list');
     list.innerHTML = '';
@@ -63,7 +110,12 @@ async function fetchInboxContacts() {
       
       const nameSpan = document.createElement('span');
       nameSpan.className = 'contact-name';
-      nameSpan.textContent = (c.name && c.name.trim() !== '') ? c.name : c.phone_number;
+      
+      let badge = "";
+      if (c.lead_score === 'Hot') badge = ' <span class="badge-hot">HOT LEAD 🔥</span>';
+      else if (c.lead_score === 'Warm') badge = ' <span class="badge-warm">Warm</span>';
+      
+      nameSpan.innerHTML = ((c.name && c.name.trim() !== '') ? c.name : c.phone_number) + badge;
       
       const previewSpan = document.createElement('span');
       previewSpan.className = 'contact-preview';
@@ -71,7 +123,7 @@ async function fetchInboxContacts() {
       
       li.appendChild(nameSpan);
       li.appendChild(previewSpan);
-      li.onclick = () => loadChat(c.phone_number, li, nameSpan.textContent);
+      li.onclick = () => loadChat(c.phone_number, li, nameSpan.textContent.replace('HOT LEAD 🔥', '').trim());
       list.appendChild(li);
     });
   } catch (e) {}
@@ -87,7 +139,7 @@ async function loadChat(number, element, displayName) {
   document.getElementById('send-btn').disabled = false;
 
   try {
-    const res = await fetch(`/api/chats/${number}`);
+    const res = await apiFetch(`/api/chats/${number}`);
     const messages = await res.json();
     const history = document.getElementById('chat-history');
     if (history.children.length === messages.length) return; 
@@ -116,7 +168,7 @@ document.getElementById('send-btn').onclick = async () => {
   history.appendChild(div);
   history.scrollTop = history.scrollHeight;
 
-  await fetch('/api/send', {
+  await apiFetch('/api/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to: currentNumber, message: msg })
@@ -129,15 +181,22 @@ document.getElementById('manual-message').addEventListener('keypress', (e) => {
 
 // TAB 3: CONTACTS CRM
 async function fetchCRMContacts() {
-  const res = await fetch('/api/contacts');
+  const res = await apiFetch('/api/contacts');
+  if (!res) return;
   const data = await res.json();
   const tbody = document.querySelector('#contacts-table tbody');
   tbody.innerHTML = '';
   data.forEach(c => {
+    let badgeClass = 'badge-cold';
+    let badgeIcon = '';
+    if (c.lead_score === 'Hot') { badgeClass = 'badge-hot'; badgeIcon = '🔥'; }
+    if (c.lead_score === 'Warm') badgeClass = 'badge-warm';
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${c.phone_number}</strong></td>
       <td><input type="text" value="${c.name || ''}" id="name-${c.phone_number}" placeholder="Add Name"></td>
+      <td><span class="${badgeClass}">${c.lead_score || 'Cold'} ${badgeIcon}</span></td>
       <td><input type="text" value="${c.notes || ''}" id="notes-${c.phone_number}" placeholder="Add Notes"></td>
       <td><button onclick="saveContact('${c.phone_number}')">Save</button></td>
     `;
@@ -147,17 +206,18 @@ async function fetchCRMContacts() {
 window.saveContact = async (phone) => {
   const name = document.getElementById(`name-${phone}`).value;
   const notes = document.getElementById(`notes-${phone}`).value;
-  await fetch('/api/contacts', {
+  await apiFetch('/api/contacts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone_number: phone, name, notes })
+    body: JSON.stringify({ phone_number: phone, name, notes }) // Note: lead_score is not updated manually here for simplicity
   });
   alert('Contact Saved!');
 };
 
 // TAB 4: APPOINTMENTS
 async function fetchAppointments() {
-  const res = await fetch('/api/appointments');
+  const res = await apiFetch('/api/appointments');
+  if (!res) return;
   const data = await res.json();
   const list = document.getElementById('appointment-list');
   list.innerHTML = '';
@@ -177,7 +237,7 @@ document.getElementById('appointment-form').onsubmit = async (e) => {
   const date = document.getElementById('appt-date').value; 
   const reason = document.getElementById('appt-reason').value;
   
-  await fetch('/api/appointments', {
+  await apiFetch('/api/appointments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number: phone, appointment_date: new Date(date).toISOString(), reason })
@@ -189,14 +249,15 @@ document.getElementById('appointment-form').onsubmit = async (e) => {
 
 // TAB 5: SETTINGS
 async function fetchSettings() {
-  const res = await fetch('/api/settings');
+  const res = await apiFetch('/api/settings');
+  if (!res) return;
   const data = await res.json();
   document.getElementById('setting-prompt').value = data.system_prompt;
 }
 document.getElementById('settings-form').onsubmit = async (e) => {
   e.preventDefault();
   const prompt = document.getElementById('setting-prompt').value;
-  await fetch('/api/settings', {
+  await apiFetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ system_prompt: prompt })
@@ -214,6 +275,3 @@ setInterval(() => {
     }
   }
 }, 3000);
-
-// Init
-loadTabData('tab-dashboard');
