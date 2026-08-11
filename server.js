@@ -68,26 +68,58 @@ async function searchOpenSooq(query) {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36' }
     });
     
-    // Scrape the raw HTML for titles and prices (Basic fallback method for heavily protected SPAs)
     const results = [];
     const $ = cheerio.load(data);
+    const nextDataStr = $('#__NEXT_DATA__').html();
     
-    // Often SPAs inject data in script tags, let's grab the raw text to do a quick regex fallback if cheerio fails
-    const rawHtml = data.toString();
-    const titleRegex = /"title":"([^"]+)"/g;
+    if (nextDataStr) {
+      try {
+        const nextData = JSON.parse(nextDataStr);
+        let posts = nextData.props?.pageProps?.initialState?.search?.posts;
+        if (!posts) {
+          const queries = nextData.props?.pageProps?.dehydratedState?.queries || [];
+          const searchQ = queries.find(q => q.queryKey && JSON.stringify(q.queryKey).includes('search'));
+          if (searchQ) posts = searchQ.state?.data?.items;
+        }
+        if (posts && posts.length > 0) {
+          posts.slice(0, 5).forEach(p => {
+             results.push(`Item: ${p.title} | Price: ${p.price} ${p.currency || 'KWD'} | Link: kw.opensooq.com/en/post/${p.id || p.post_id || ''}`);
+          });
+        }
+      } catch(err) { console.error("JSON parse error:", err.message); }
+    }
     
-    let tMatch;
-    let limit = 0;
-    while ((tMatch = titleRegex.exec(rawHtml)) !== null && limit < 5) {
-      const title = tMatch[1];
-      if (title.length > 10 && title.toLowerCase().includes(query.toLowerCase().split(' ')[0])) {
-         results.push(`Item Found: ${title}`);
-         limit++;
+    if (results.length === 0) {
+      // Fallback regex if __NEXT_DATA__ structure changed
+      const rawHtml = data.toString();
+      const comboRegex = /"title":"([^"]+)".{0,150}?"price":([0-9]+)/g;
+      
+      let match;
+      let limit = 0;
+      while ((match = comboRegex.exec(rawHtml)) !== null && limit < 5) {
+        const title = match[1];
+        const price = match[2];
+        if (title.length > 10 && title.toLowerCase().includes(query.toLowerCase().split(' ')[0])) {
+           results.push(`Item Found: ${title} | Price: ${price} KWD`);
+           limit++;
+        }
+      }
+      
+      // Absolute fallback if everything fails
+      if (results.length === 0) {
+        const titleRegex = /"title":"([^"]+)"/g;
+        let tMatch;
+        while ((tMatch = titleRegex.exec(rawHtml)) !== null && limit < 5) {
+          if (tMatch[1].length > 10 && tMatch[1].toLowerCase().includes(query.toLowerCase().split(' ')[0])) {
+             results.push(`Item Found: ${tMatch[1]}`);
+             limit++;
+          }
+        }
       }
     }
     
     if (results.length > 0) {
-      return JSON.stringify({ success: true, items: results, notice: "Prices might vary. Send the user to kw.opensooq.com for links." });
+      return JSON.stringify({ success: true, items: results, notice: "Send the user the direct links if they are interested." });
     } else {
       return JSON.stringify({ success: false, message: "Could not find any items right now or the marketplace blocked the bot." });
     }
