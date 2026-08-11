@@ -258,9 +258,16 @@ app.post('/webhook', async (req, res) => {
             const responseData = result.response;
             console.log("AI RAW RESPONSE:", JSON.stringify(responseData));
             
-            // Check if AI decided to call a function
-            if (responseData.functionCalls && responseData.functionCalls.length > 0) {
-              const call = responseData.functionCalls[0];
+            // Check if AI decided to call a function by parsing the raw JSON
+            let rawParts = [];
+            try {
+               rawParts = responseData.candidates[0].content.parts || [];
+            } catch(err) {}
+            
+            const functionCallPart = rawParts.find(p => p.functionCall);
+            
+            if (functionCallPart) {
+              const call = functionCallPart.functionCall;
               console.log("AI TRIGGERED FUNCTION:", call.name, "WITH ARGS:", call.args);
               
               if (call.name === "search_opensooq") {
@@ -280,6 +287,7 @@ app.post('/webhook', async (req, res) => {
               }
             } else {
               aiResponse = responseData.text();
+              if (!aiResponse) aiResponse = "Sorry, I couldn't process that request properly.";
             }
             break; 
           } catch (e) { 
