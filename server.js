@@ -3,91 +3,108 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const path = require('path');
 
 const app = express();
 app.use(bodyParser.json());
 
-// Serve the frontend dashboard (files are in root)
-app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-app.get('/style.css', (req, res) => {
-  res.sendFile(path.join(__dirname, 'style.css'));
-});
-app.get('/script.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'script.js'));
-});
+// Serve the frontend dashboard
+app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, 'style.css')));
+app.get('/script.js', (req, res) => res.sendFile(path.join(__dirname, 'script.js')));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_super_secret_token';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Initialize SQLite Database with New Tables
-const db = new sqlite3.Database('./chatbot.db', (err) => {
-  if (err) {
-    console.error('Error opening database', err.message);
-  } else {
-    console.log('Connected to the SQLite database.');
-    db.serialize(() => {
-      // 1. Messages Table
-      db.run(`CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+// Initialize PostgreSQL Pool (Supabase)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+async function initDB() {
+  if (!process.env.DATABASE_URL) {
+    console.warn("WARNING: DATABASE_URL is not set. The server will crash on DB operations.");
+    return;
+  }
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
         phone_number TEXT,
         direction TEXT,
         message TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-      
-      // 2. Contacts Table
-      db.run(`CREATE TABLE IF NOT EXISTS contacts (
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
         phone_number TEXT PRIMARY KEY,
         name TEXT,
         notes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-      
-      // 3. Appointments Table
-      db.run(`CREATE TABLE IF NOT EXISTS appointments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS appointments (
+        id SERIAL PRIMARY KEY,
         phone_number TEXT,
-        appointment_date DATETIME,
+        appointment_date TIMESTAMP,
         reason TEXT,
         reminder_sent INTEGER DEFAULT 0
-      )`);
-      
-      // 4. Settings Table
-      db.run(`CREATE TABLE IF NOT EXISTS settings (
+      )
+    `);
+    
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
-      )`);
-      
-      // Insert default system prompt if it doesn't exist
-      const defaultPrompt = `You are a professional, helpful, and friendly sales assistant for an individual business. 
+      )
+    `);
+
+    const defaultPrompt = `You are a professional, helpful, and friendly sales assistant for an individual business. 
 Your goal is to answer customer queries accurately, generate sales presence, and be as helpful as possible. 
 You can communicate fluently in any language the customer uses. Keep your answers concise, engaging, and suitable for a WhatsApp conversation (use emojis appropriately).`;
-      db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('system_prompt', ?)`, [defaultPrompt]);
-    });
+    
+    await pool.query(`
+      INSERT INTO settings (key, value) VALUES ('system_prompt', $1)
+      ON CONFLICT(key) DO NOTHING
+    `, [defaultPrompt]);
+    
+    console.log('Connected to PostgreSQL (Supabase) database and initialized tables.');
+  } catch (err) {
+    console.error('Database initialization error:', err);
   }
-});
+}
+initDB();
 
 // Helper functions
-function logMessage(phone_number, direction, message) {
-  db.run(`INSERT INTO messages (phone_number, direction, message) VALUES (?, ?, ?)`, 
-    [phone_number, direction, message]);
-  // Also ensure contact exists
-  db.run(`INSERT OR IGNORE INTO contacts (phone_number, name, notes) VALUES (?, '', '')`, [phone_number]);
+async function logMessage(phone_number, direction, message) {
+  try {
+    await pool.query(`INSERT INTO messages (phone_number, direction, message) VALUES ($1, $2, $3)`, 
+      [phone_number, direction, message]);
+    await pool.query(`
+      INSERT INTO contacts (phone_number, name, notes) VALUES ($1, '', '')
+      ON CONFLICT (phone_number) DO NOTHING
+    `, [phone_number]);
+  } catch (err) {
+    console.error("logMessage Error: ", err);
+  }
 }
 
-function getSystemPrompt() {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT value FROM settings WHERE key = 'system_prompt'`, (err, row) => {
-      if (err || !row) resolve("You are a helpful AI assistant.");
-      else resolve(row.value);
-    });
-  });
+async function getSystemPrompt() {
+  try {
+    const res = await pool.query(`SELECT value FROM settings WHERE key = 'system_prompt'`);
+    if (res.rows.length > 0) return res.rows[0].value;
+    return "You are a helpful AI assistant.";
+  } catch (err) {
+    return "You are a helpful AI assistant.";
+  }
 }
 
 let cachedModels = [];
@@ -113,33 +130,36 @@ async function getValidModelsList() {
 // -----------------------------------------
 
 // Tab 1: Analytics
-app.get('/api/stats', (req, res) => {
-  const stats = {};
-  db.get(`SELECT COUNT(*) as count FROM messages`, (err, row) => {
-    stats.total_messages = row ? row.count : 0;
-    db.get(`SELECT COUNT(*) as count FROM contacts`, (err, row) => {
-      stats.total_contacts = row ? row.count : 0;
-      db.get(`SELECT COUNT(*) as count FROM appointments`, (err, row) => {
-        stats.total_appointments = row ? row.count : 0;
-        res.json(stats);
-      });
+app.get('/api/stats', async (req, res) => {
+  try {
+    const messages = await pool.query(`SELECT COUNT(*) as count FROM messages`);
+    const contacts = await pool.query(`SELECT COUNT(*) as count FROM contacts`);
+    const appointments = await pool.query(`SELECT COUNT(*) as count FROM appointments`);
+    res.json({
+      total_messages: parseInt(messages.rows[0].count),
+      total_contacts: parseInt(contacts.rows[0].count),
+      total_appointments: parseInt(appointments.rows[0].count)
     });
-  });
+  } catch (err) { res.status(500).json({error: err.message}); }
 });
 
 // Tab 2: Inbox (Chats)
-app.get('/api/chats', (req, res) => {
-  db.all(`SELECT c.phone_number, c.name, (SELECT message FROM messages WHERE phone_number = c.phone_number ORDER BY timestamp DESC LIMIT 1) as last_message FROM contacts c ORDER BY c.created_at DESC`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.get('/api/chats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT c.phone_number, c.name, 
+      (SELECT message FROM messages WHERE phone_number = c.phone_number ORDER BY timestamp DESC LIMIT 1) as last_message 
+      FROM contacts c ORDER BY c.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/chats/:number', (req, res) => {
-  db.all(`SELECT * FROM messages WHERE phone_number = ? ORDER BY timestamp ASC`, [req.params.number], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.get('/api/chats/:number', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM messages WHERE phone_number = $1 ORDER BY timestamp ASC`, [req.params.number]);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/send', async (req, res) => {
@@ -154,7 +174,7 @@ app.post('/api/send', async (req, res) => {
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
       data: { messaging_product: 'whatsapp', to: to, type: 'text', text: { body: message } },
     });
-    logMessage(to, 'manual', message);
+    await logMessage(to, 'manual', message);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -162,56 +182,59 @@ app.post('/api/send', async (req, res) => {
 });
 
 // Tab 3: Contacts CRM
-app.get('/api/contacts', (req, res) => {
-  db.all(`SELECT * FROM contacts ORDER BY created_at DESC`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.get('/api/contacts', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM contacts ORDER BY created_at DESC`);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/contacts', (req, res) => {
+app.post('/api/contacts', async (req, res) => {
   const { phone_number, name, notes } = req.body;
   if (!phone_number) return res.status(400).json({ error: "Missing phone number" });
-  
-  db.run(`INSERT INTO contacts (phone_number, name, notes) VALUES (?, ?, ?)
-          ON CONFLICT(phone_number) DO UPDATE SET name=excluded.name, notes=excluded.notes`, 
-          [phone_number, name || '', notes || ''], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-  });
+  try {
+    await pool.query(`
+      INSERT INTO contacts (phone_number, name, notes) VALUES ($1, $2, $3)
+      ON CONFLICT(phone_number) DO UPDATE SET name=EXCLUDED.name, notes=EXCLUDED.notes
+    `, [phone_number, name || '', notes || '']);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Tab 4: Appointments
-app.get('/api/appointments', (req, res) => {
-  db.all(`SELECT * FROM appointments ORDER BY appointment_date ASC`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.get('/api/appointments', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM appointments ORDER BY appointment_date ASC`);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/appointments', (req, res) => {
+app.post('/api/appointments', async (req, res) => {
   const { phone_number, appointment_date, reason } = req.body;
   if (!phone_number || !appointment_date) return res.status(400).json({ error: "Missing data" });
-  
-  db.run(`INSERT INTO appointments (phone_number, appointment_date, reason) VALUES (?, ?, ?)`, 
-          [phone_number, appointment_date, reason || ''], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-  });
+  try {
+    await pool.query(`INSERT INTO appointments (phone_number, appointment_date, reason) VALUES ($1, $2, $3)`, 
+      [phone_number, appointment_date, reason || '']);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Tab 5: Settings
-app.get('/api/settings', (req, res) => {
-  getSystemPrompt().then(prompt => res.json({ system_prompt: prompt }));
+app.get('/api/settings', async (req, res) => {
+  const prompt = await getSystemPrompt();
+  res.json({ system_prompt: prompt });
 });
 
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', async (req, res) => {
   const { system_prompt } = req.body;
   if (!system_prompt) return res.status(400).json({ error: "Missing prompt" });
-  db.run(`UPDATE settings SET value = ? WHERE key = 'system_prompt'`, [system_prompt], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    await pool.query(`
+      INSERT INTO settings (key, value) VALUES ('system_prompt', $1)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value
+    `, [system_prompt]);
     res.json({ success: true });
-  });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 
@@ -219,51 +242,54 @@ app.post('/api/settings', (req, res) => {
 // AUTOMATED APPOINTMENT REMINDERS (CRON)
 // -----------------------------------------
 setInterval(async () => {
+  if (!process.env.DATABASE_URL) return;
   // Check for appointments in the next 24 hours where reminder hasn't been sent
   const twentyFourHoursFromNow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const now = new Date().toISOString();
   
-  db.all(`SELECT * FROM appointments WHERE appointment_date > ? AND appointment_date <= ? AND reminder_sent = 0`, 
-    [now, twentyFourHoursFromNow], async (err, rows) => {
-      if (err || !rows) return;
+  try {
+    const result = await pool.query(`SELECT * FROM appointments WHERE appointment_date > $1 AND appointment_date <= $2 AND reminder_sent = 0`, 
+      [now, twentyFourHoursFromNow]);
       
-      for (const appt of rows) {
-        try {
-           const modelsToTry = await getValidModelsList();
-           let reminderText = null;
-           for (const modelName of modelsToTry) {
-             try {
-               const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-               const model = genAI.getGenerativeModel({ model: modelName });
-               const prompt = `You are a helpful assistant. Generate a short, polite appointment reminder for the customer. 
+    for (const appt of result.rows) {
+      try {
+          const modelsToTry = await getValidModelsList();
+          let reminderText = null;
+          for (const modelName of modelsToTry) {
+            try {
+              const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+              const model = genAI.getGenerativeModel({ model: modelName });
+              const prompt = `You are a helpful assistant. Generate a short, polite appointment reminder for the customer. 
 The appointment is for: ${appt.reason}. The time is: ${appt.appointment_date}. 
 Write the message in the language the customer usually speaks. Be very brief and friendly.`;
-               
-               const result = await model.generateContent(prompt);
-               reminderText = result.response.text();
-               break;
-             } catch (e) {}
-           }
-           
-           if (reminderText) {
-             const phoneNumberId = process.env.PHONE_NUMBER_ID || "1162096826996318";
-             await axios({
-                method: 'POST',
-                url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-                headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
-                data: { messaging_product: 'whatsapp', to: appt.phone_number, type: 'text', text: { body: reminderText } },
-             });
-             logMessage(appt.phone_number, 'outbound', reminderText);
-             
-             // Mark as sent
-             db.run(`UPDATE appointments SET reminder_sent = 1 WHERE id = ?`, [appt.id]);
-             console.log(`Sent reminder to ${appt.phone_number}`);
-           }
-        } catch (e) {
-           console.error("Failed to send reminder:", e.message);
-        }
+              
+              const resGen = await model.generateContent(prompt);
+              reminderText = resGen.response.text();
+              break;
+            } catch (e) {}
+          }
+          
+          if (reminderText) {
+            const phoneNumberId = process.env.PHONE_NUMBER_ID || "1162096826996318";
+            await axios({
+              method: 'POST',
+              url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+              headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+              data: { messaging_product: 'whatsapp', to: appt.phone_number, type: 'text', text: { body: reminderText } },
+            });
+            await logMessage(appt.phone_number, 'outbound', reminderText);
+            
+            // Mark as sent
+            await pool.query(`UPDATE appointments SET reminder_sent = 1 WHERE id = $1`, [appt.id]);
+            console.log(`Sent reminder to ${appt.phone_number}`);
+          }
+      } catch (e) {
+          console.error("Failed to send reminder:", e.message);
       }
-  });
+    }
+  } catch (err) {
+    console.error("Cron Database Error: ", err);
+  }
 }, 60000); // Check every 1 minute
 
 
@@ -305,7 +331,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       res.sendStatus(200); 
-      logMessage(from, 'inbound', msgBody);
+      await logMessage(from, 'inbound', msgBody);
 
       try {
         const sysPrompt = await getSystemPrompt();
@@ -378,7 +404,7 @@ app.post('/webhook', async (req, res) => {
           data: payloadData,
         });
         
-        logMessage(from, 'outbound', aiResponse);
+        await logMessage(from, 'outbound', aiResponse);
       } catch (error) {
         console.error('Error processing AI:', error.message);
       }
@@ -428,7 +454,7 @@ app.get('/force-test', async (req, res) => {
       data: { messaging_product: 'whatsapp', to: targetPhone, type: 'text', text: { body: aiResponse } },
     });
     
-    logMessage(targetPhone, 'outbound', aiResponse);
+    await logMessage(targetPhone, 'outbound', aiResponse);
     res.send(`<h1>Success!</h1><p>Forced message to ${targetPhone}.</p>`);
   } catch (err) {
     res.send(`<h1>Error</h1><p>${err.message}</p>`);
