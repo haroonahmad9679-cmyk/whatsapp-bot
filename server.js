@@ -274,13 +274,11 @@ app.post('/webhook', async (req, res) => {
                 const apiResult = await searchOpenSooq(call.args.query || msgBody);
                 console.log("SCRAPER RESULT:", apiResult);
                 
-                // Send API result back to Gemini so it can read it and formulate a reply
-                const secondResult = await chat.sendMessage([{
-                  functionResponse: {
-                    name: "search_opensooq",
-                    response: { content: apiResult }
-                  }
-                }]);
+                // Send API result back to Gemini as standard text to bypass the broken 'function' role in the SDK
+                const secondResult = await chat.sendMessage(
+                  `SYSTEM: The function '${call.name}' was executed successfully. Here is the JSON result:\n${apiResult}\n\n` +
+                  `Please continue the conversation and formulate a helpful, natural reply to the user based on this data.`
+                );
                 aiResponse = secondResult.response.text();
               } else {
                 aiResponse = "I got confused and tried to use a tool that doesn't exist: " + call.name;
