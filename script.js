@@ -1,58 +1,82 @@
-let currentNumber = null;
+/* script.js */
+// TAB SWITCHING LOGIC
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    loadTabData(btn.dataset.tab);
+  };
+});
 
-async function fetchContacts() {
+function loadTabData(tabId) {
+  if (tabId === 'tab-analytics') fetchStats();
+  if (tabId === 'tab-inbox') fetchInboxContacts();
+  if (tabId === 'tab-contacts') fetchCRMContacts();
+  if (tabId === 'tab-appointments') fetchAppointments();
+  if (tabId === 'tab-settings') fetchSettings();
+}
+
+// TAB 1: ANALYTICS
+async function fetchStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    document.getElementById('stat-messages').textContent = data.total_messages;
+    document.getElementById('stat-contacts').textContent = data.total_contacts;
+    document.getElementById('stat-appointments').textContent = data.total_appointments;
+  } catch (e) {}
+}
+
+// TAB 2: INBOX
+let currentNumber = null;
+async function fetchInboxContacts() {
   try {
     const res = await fetch('/api/chats');
     const contacts = await res.json();
     const list = document.getElementById('contact-list');
-    
-    // Remember currently selected to not lose active state
     list.innerHTML = '';
     
     if (contacts.length === 0) {
        list.innerHTML = '<li style="padding: 20px; color: #666; text-align: center;">No chats yet</li>';
        return;
     }
-
+    
     contacts.forEach(c => {
       const li = document.createElement('li');
       li.className = 'contact-item';
       if (c.phone_number === currentNumber) li.classList.add('active');
-      li.textContent = c.phone_number;
-      li.onclick = () => loadChat(c.phone_number, li);
+      
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'contact-name';
+      nameSpan.textContent = (c.name && c.name.trim() !== '') ? c.name : c.phone_number;
+      
+      const previewSpan = document.createElement('span');
+      previewSpan.className = 'contact-preview';
+      previewSpan.textContent = c.last_message || '...';
+      
+      li.appendChild(nameSpan);
+      li.appendChild(previewSpan);
+      li.onclick = () => loadChat(c.phone_number, li, nameSpan.textContent);
       list.appendChild(li);
     });
-  } catch (e) {
-    console.error("Failed to fetch contacts", e);
-  }
+  } catch (e) {}
 }
 
-async function loadChat(number, element) {
+async function loadChat(number, element, displayName) {
   currentNumber = number;
-  
-  // Update active class
   document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
-  if (element) {
-    element.classList.add('active');
-  } else {
-    // If element is null (from polling), try to find it
-    const items = document.querySelectorAll('.contact-item');
-    items.forEach(el => {
-      if (el.textContent === number) el.classList.add('active');
-    });
-  }
+  if (element) element.classList.add('active');
   
-  document.getElementById('current-contact').textContent = `Chat with ${number}`;
+  document.getElementById('current-contact').textContent = `Chat with ${displayName}`;
   document.getElementById('manual-message').disabled = false;
   document.getElementById('send-btn').disabled = false;
 
   try {
     const res = await fetch(`/api/chats/${number}`);
     const messages = await res.json();
-    
     const history = document.getElementById('chat-history');
-    
-    // Simple check to prevent scrolling if no new messages
     if (history.children.length === messages.length) return; 
 
     history.innerHTML = '';
@@ -62,22 +86,16 @@ async function loadChat(number, element) {
       div.textContent = m.message;
       history.appendChild(div);
     });
-    
-    // Scroll to bottom
     history.scrollTop = history.scrollHeight;
-  } catch (e) {
-    console.error("Failed to fetch chat", e);
-  }
+  } catch (e) {}
 }
 
 document.getElementById('send-btn').onclick = async () => {
   const input = document.getElementById('manual-message');
   const msg = input.value.trim();
   if (!msg || !currentNumber) return;
-  
   input.value = '';
   
-  // Optimistically add to UI
   const history = document.getElementById('chat-history');
   const div = document.createElement('div');
   div.className = `message manual`;
@@ -85,33 +103,102 @@ document.getElementById('send-btn').onclick = async () => {
   history.appendChild(div);
   history.scrollTop = history.scrollHeight;
 
-  try {
-    await fetch('/api/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: currentNumber, message: msg })
-    });
-  } catch (e) {
-    console.error("Failed to send", e);
-    div.textContent = "Failed to send: " + msg;
-    div.style.background = "#ff3333";
-  }
+  await fetch('/api/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: currentNumber, message: msg })
+  });
 };
 
-// Handle Enter key
-document.getElementById('manual-message').addEventListener('keypress', function (e) {
-  if (e.key === 'Enter') {
-    document.getElementById('send-btn').click();
-  }
+document.getElementById('manual-message').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') document.getElementById('send-btn').click();
 });
 
-// Poll for new messages every 3 seconds
+// TAB 3: CONTACTS CRM
+async function fetchCRMContacts() {
+  const res = await fetch('/api/contacts');
+  const data = await res.json();
+  const tbody = document.querySelector('#contacts-table tbody');
+  tbody.innerHTML = '';
+  data.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${c.phone_number}</td>
+      <td><input type="text" value="${c.name || ''}" id="name-${c.phone_number}" placeholder="Add Name"></td>
+      <td><input type="text" value="${c.notes || ''}" id="notes-${c.phone_number}" placeholder="Add Notes"></td>
+      <td><button onclick="saveContact('${c.phone_number}')" style="padding:8px 12px; font-size:0.8rem;">Save</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+window.saveContact = async (phone) => {
+  const name = document.getElementById(`name-${phone}`).value;
+  const notes = document.getElementById(`notes-${phone}`).value;
+  await fetch('/api/contacts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone_number: phone, name, notes })
+  });
+  alert('Contact Saved!');
+};
+
+// TAB 4: APPOINTMENTS
+async function fetchAppointments() {
+  const res = await fetch('/api/appointments');
+  const data = await res.json();
+  const list = document.getElementById('appointment-list');
+  list.innerHTML = '';
+  data.forEach(a => {
+    const li = document.createElement('li');
+    const dateStr = new Date(a.appointment_date).toLocaleString();
+    const sentBadge = a.reminder_sent ? '<span class="badge">Reminder Sent</span>' : '<span class="badge" style="background:#ff9800">Pending</span>';
+    li.innerHTML = `<div><strong>${a.phone_number}</strong> - ${a.reason}<br><small style="color:#8b92a1">${dateStr}</small></div> ${sentBadge}`;
+    list.appendChild(li);
+  });
+}
+document.getElementById('appointment-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const phone = document.getElementById('appt-phone').value;
+  const date = document.getElementById('appt-date').value; 
+  const reason = document.getElementById('appt-reason').value;
+  
+  await fetch('/api/appointments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone_number: phone, appointment_date: new Date(date).toISOString(), reason })
+  });
+  alert('Appointment Scheduled! AI Reminder enabled.');
+  document.getElementById('appointment-form').reset();
+  fetchAppointments();
+};
+
+// TAB 5: SETTINGS
+async function fetchSettings() {
+  const res = await fetch('/api/settings');
+  const data = await res.json();
+  document.getElementById('setting-prompt').value = data.system_prompt;
+}
+document.getElementById('settings-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const prompt = document.getElementById('setting-prompt').value;
+  await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ system_prompt: prompt })
+  });
+  alert('Settings Saved!');
+};
+
+// Polling for Inbox
 setInterval(() => {
-  fetchContacts();
-  if (currentNumber) {
-    loadChat(currentNumber, null);
+  if (document.getElementById('tab-inbox').classList.contains('active')) {
+    fetchInboxContacts();
+    if (currentNumber) {
+      const nameElem = document.getElementById('current-contact');
+      loadChat(currentNumber, null, nameElem.textContent.replace('Chat with ', ''));
+    }
   }
 }, 3000);
 
-// Initial load
-fetchContacts();
+// Init
+loadTabData('tab-analytics');

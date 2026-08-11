@@ -3,29 +3,140 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhatsApp Bot Dashboard</title>
+  <title>AI Octopus Lite CRM</title>
   <link rel="stylesheet" href="style.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Material Icons for a premium look -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
 <body>
   <div class="dashboard">
+    <!-- SIDEBAR -->
     <div class="sidebar">
-      <h2>Conversations</h2>
-      <ul id="contact-list">
-        <!-- Contacts will load here -->
+      <div class="logo-area">
+        <span class="material-icons">hub</span>
+        <h2>AI Octopus Lite</h2>
+      </div>
+      <ul id="nav-tabs">
+        <li class="tab-btn active" data-tab="tab-analytics"><span class="material-icons">analytics</span> Analytics</li>
+        <li class="tab-btn" data-tab="tab-inbox"><span class="material-icons">chat</span> Live Inbox</li>
+        <li class="tab-btn" data-tab="tab-contacts"><span class="material-icons">people</span> CRM Contacts</li>
+        <li class="tab-btn" data-tab="tab-appointments"><span class="material-icons">event</span> Appointments</li>
+        <li class="tab-btn" data-tab="tab-settings"><span class="material-icons">settings</span> Bot Settings</li>
       </ul>
     </div>
-    <div class="chat-area">
-      <div class="chat-header">
-        <h3 id="current-contact">Select a contact</h3>
+
+    <!-- MAIN CONTENT AREA -->
+    <div class="main-content">
+      
+      <!-- TAB 1: ANALYTICS -->
+      <div id="tab-analytics" class="tab-pane active">
+        <div class="header">
+          <h1>Dashboard Analytics</h1>
+          <p>High-level view of your AI bot's performance.</p>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <h3 id="stat-messages">0</h3>
+            <p>Total Messages</p>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-contacts">0</h3>
+            <p>Total Contacts</p>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-appointments">0</h3>
+            <p>Appointments Scheduled</p>
+          </div>
+        </div>
       </div>
-      <div class="chat-history" id="chat-history">
-        <!-- Messages will load here -->
+
+      <!-- TAB 2: INBOX -->
+      <div id="tab-inbox" class="tab-pane">
+        <div class="inbox-layout">
+          <div class="inbox-sidebar">
+            <ul id="contact-list"></ul>
+          </div>
+          <div class="chat-area">
+            <div class="chat-header">
+              <h3 id="current-contact">Select a contact</h3>
+            </div>
+            <div class="chat-history" id="chat-history"></div>
+            <div class="chat-input-area">
+              <input type="text" id="manual-message" placeholder="Type a manual message (pauses AI)..." disabled>
+              <button id="send-btn" disabled>Send</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="chat-input-area">
-        <input type="text" id="manual-message" placeholder="Type a manual message (pauses AI)..." disabled>
-        <button id="send-btn" disabled>Send</button>
+
+      <!-- TAB 3: CONTACTS -->
+      <div id="tab-contacts" class="tab-pane">
+        <div class="header">
+          <h1>CRM Contacts</h1>
+          <p>Save customer names and notes to your database.</p>
+        </div>
+        <div class="card">
+          <table id="contacts-table">
+            <thead>
+              <tr>
+                <th>Phone Number</th>
+                <th>Name</th>
+                <th>Notes</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
+
+      <!-- TAB 4: APPOINTMENTS -->
+      <div id="tab-appointments" class="tab-pane">
+        <div class="header">
+          <h1>Appointments & AI Reminders</h1>
+          <p>When you schedule an appointment here, the AI will automatically text them 24 hours before!</p>
+        </div>
+        <div class="card">
+          <form id="appointment-form">
+            <div class="form-group">
+              <label>Phone Number (with country code)</label>
+              <input type="text" id="appt-phone" required placeholder="e.g. 15551234567">
+            </div>
+            <div class="form-group">
+              <label>Date & Time</label>
+              <input type="datetime-local" id="appt-date" required>
+            </div>
+            <div class="form-group">
+              <label>Reason for Appointment</label>
+              <input type="text" id="appt-reason" required placeholder="e.g. Consultation at 3PM">
+            </div>
+            <button type="submit">Schedule & Enable AI Reminder</button>
+          </form>
+        </div>
+        <div class="card" style="margin-top: 20px;">
+          <h3>Upcoming Appointments</h3>
+          <ul id="appointment-list" class="simple-list"></ul>
+        </div>
+      </div>
+
+      <!-- TAB 5: SETTINGS -->
+      <div id="tab-settings" class="tab-pane">
+        <div class="header">
+          <h1>Bot Settings</h1>
+          <p>Change how your AI Sales Assistant behaves.</p>
+        </div>
+        <div class="card">
+          <form id="settings-form">
+            <div class="form-group">
+              <label>System Prompt (AI Personality & Instructions)</label>
+              <textarea id="setting-prompt" rows="12" required></textarea>
+            </div>
+            <button type="submit">Save Settings</button>
+          </form>
+        </div>
+      </div>
+
     </div>
   </div>
   <script src="script.js"></script>
