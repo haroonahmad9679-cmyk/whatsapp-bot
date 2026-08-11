@@ -1,24 +1,37 @@
-/* script.js */
-// TAB SWITCHING LOGIC
-document.querySelectorAll('.tab-btn').forEach(btn => {
+/* script.js - Harry Chatbot Ai */
+
+// TAB SWITCHING LOGIC (Handles both Sidebar and Mobile Nav)
+document.querySelectorAll('.sb-item, .mn-item').forEach(btn => {
   btn.onclick = () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    // Remove active from all nav items
+    document.querySelectorAll('.sb-item, .mn-item').forEach(b => b.classList.remove('active'));
+    // Hide all tab panes
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    
+    // Add active to clicked nav item
     btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
-    loadTabData(btn.dataset.tab);
+    
+    // Sync sidebar and mobile nav if they share the same data-tab
+    const tabId = btn.dataset.tab;
+    document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(b => b.classList.add('active'));
+    
+    // Show correct tab pane
+    const pane = document.getElementById(tabId);
+    if(pane) pane.classList.add('active');
+    
+    loadTabData(tabId);
   };
 });
 
 function loadTabData(tabId) {
-  if (tabId === 'tab-analytics') fetchStats();
+  if (tabId === 'tab-dashboard') fetchStats();
   if (tabId === 'tab-inbox') fetchInboxContacts();
   if (tabId === 'tab-contacts') fetchCRMContacts();
   if (tabId === 'tab-appointments') fetchAppointments();
   if (tabId === 'tab-settings') fetchSettings();
 }
 
-// TAB 1: ANALYTICS
+// TAB 1: DASHBOARD
 async function fetchStats() {
   try {
     const res = await fetch('/api/stats');
@@ -39,7 +52,7 @@ async function fetchInboxContacts() {
     list.innerHTML = '';
     
     if (contacts.length === 0) {
-       list.innerHTML = '<li style="padding: 20px; color: #666; text-align: center;">No chats yet</li>';
+       list.innerHTML = '<li style="padding: 20px; color: var(--text-3); text-align: center;">No chats yet</li>';
        return;
     }
     
@@ -123,10 +136,10 @@ async function fetchCRMContacts() {
   data.forEach(c => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${c.phone_number}</td>
+      <td><strong>${c.phone_number}</strong></td>
       <td><input type="text" value="${c.name || ''}" id="name-${c.phone_number}" placeholder="Add Name"></td>
       <td><input type="text" value="${c.notes || ''}" id="notes-${c.phone_number}" placeholder="Add Notes"></td>
-      <td><button onclick="saveContact('${c.phone_number}')" style="padding:8px 12px; font-size:0.8rem;">Save</button></td>
+      <td><button onclick="saveContact('${c.phone_number}')">Save</button></td>
     `;
     tbody.appendChild(tr);
   });
@@ -151,8 +164,10 @@ async function fetchAppointments() {
   data.forEach(a => {
     const li = document.createElement('li');
     const dateStr = new Date(a.appointment_date).toLocaleString();
-    const sentBadge = a.reminder_sent ? '<span class="badge">Reminder Sent</span>' : '<span class="badge" style="background:#ff9800">Pending</span>';
-    li.innerHTML = `<div><strong>${a.phone_number}</strong> - ${a.reason}<br><small style="color:#8b92a1">${dateStr}</small></div> ${sentBadge}`;
+    const sentBadge = a.reminder_sent 
+      ? '<span class="badge">Reminder Sent <i class="fa-solid fa-check"></i></span>' 
+      : '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border-color:rgba(245,158,11,0.2);">Pending AI</span>';
+    li.innerHTML = `<div><strong style="color:#fff;">${a.phone_number}</strong> - <span style="color:var(--text-2);">${a.reason}</span><br><small style="color:var(--text-3); margin-top:4px; display:block;"><i class="fa-regular fa-clock"></i> ${dateStr}</small></div> ${sentBadge}`;
     list.appendChild(li);
   });
 }
@@ -201,4 +216,4 @@ setInterval(() => {
 }, 3000);
 
 // Init
-loadTabData('tab-analytics');
+loadTabData('tab-dashboard');

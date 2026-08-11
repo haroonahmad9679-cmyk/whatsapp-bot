@@ -2,59 +2,141 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Octopus Lite CRM</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Harry Chatbot Ai - CRM Dashboard</title>
   <link rel="stylesheet" href="style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <!-- Material Icons for a premium look -->
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
-  <div class="dashboard">
+  
+  <div id="app" class="app">
     <!-- SIDEBAR -->
-    <div class="sidebar">
-      <div class="logo-area">
-        <span class="material-icons">hub</span>
-        <h2>AI Octopus Lite</h2>
+    <aside class="sidebar">
+      <div class="sb-logo">
+        <div class="sb-logo-icon-img"><i class="fa-solid fa-robot" style="color: #fff; font-size: 16px;"></i></div>
+        <span class="sb-logo-text">Harry Chatbot <span style="color:#3b82f6">Ai</span></span>
       </div>
-      <ul id="nav-tabs">
-        <li class="tab-btn active" data-tab="tab-analytics"><span class="material-icons">analytics</span> Analytics</li>
-        <li class="tab-btn" data-tab="tab-inbox"><span class="material-icons">chat</span> Live Inbox</li>
-        <li class="tab-btn" data-tab="tab-contacts"><span class="material-icons">people</span> CRM Contacts</li>
-        <li class="tab-btn" data-tab="tab-appointments"><span class="material-icons">event</span> Appointments</li>
-        <li class="tab-btn" data-tab="tab-settings"><span class="material-icons">settings</span> Bot Settings</li>
-      </ul>
-    </div>
-
-    <!-- MAIN CONTENT AREA -->
-    <div class="main-content">
       
-      <!-- TAB 1: ANALYTICS -->
-      <div id="tab-analytics" class="tab-pane active">
-        <div class="header">
-          <h1>Dashboard Analytics</h1>
-          <p>High-level view of your AI bot's performance.</p>
+      <nav class="sb-nav">
+        <button class="sb-item active" data-tab="tab-dashboard">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span>Dashboard</span>
+        </button>
+        <button class="sb-item" data-tab="tab-inbox">
+          <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <span>Inbox Log</span>
+        </button>
+        <button class="sb-item" data-tab="tab-contacts">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <span>Accounts CRM</span>
+        </button>
+        <button class="sb-item" data-tab="tab-appointments">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Scheduler</span>
+          <span class="sb-badge" style="background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;">AI</span>
+        </button>
+        <button class="sb-item" data-tab="tab-settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <!-- AI Quota progress bar inside sidebar -->
+      <div class="sb-ai-quota">
+        <div class="quota-header">
+          <span class="quota-title">🤖 AI Quota</span>
+          <span class="quota-percent">100%</span>
+        </div>
+        <div class="quota-bar-container">
+          <div class="quota-bar-fill"></div>
+        </div>
+        <div class="quota-footer">
+          <span>Unlimited Plan</span>
+          <a href="#" class="quota-topup">⚡ Active</a>
+        </div>
+        <div class="quota-info">
+          💡 AI replies are unrestricted on this server. Automatic background cron is active.
+        </div>
+      </div>
+
+      <div class="sb-footer">
+        <div class="sb-user">
+          <div class="sb-avatar"><i class="fa-solid fa-user-tie"></i></div>
+          <div class="sb-user-info">
+            <span class="sb-user-name">Harry Admin</span>
+            <span class="sb-user-role">Bot Manager</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- BOTTOM MOBILE NAV -->
+    <nav class="mobile-nav">
+      <button class="mn-item active" data-tab="tab-dashboard">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="mn-item" data-tab="tab-inbox">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span>Inbox</span>
+      </button>
+      <button class="mn-item" data-tab="tab-appointments">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Scheduler</span>
+      </button>
+      <button class="mn-item" data-tab="tab-contacts">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        <span>Accounts</span>
+      </button>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="main">
+      
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="page-head">
+          <div>
+            <h1>Dashboard</h1>
+            <p>Overview of your automation performance</p>
+          </div>
+          <div class="bot-status">
+            <span class="pulse-dot"></span> Bot is Active
+          </div>
         </div>
         <div class="stats-grid">
           <div class="stat-card">
-            <h3 id="stat-messages">0</h3>
-            <p>Total Messages</p>
+            <div class="stat-icon" style="color: #3b82f6; background: rgba(59, 130, 246, 0.1);"><i class="fa-solid fa-message"></i></div>
+            <div class="stat-info">
+              <h3 id="stat-messages">0</h3>
+              <p>Total Messages</p>
+            </div>
           </div>
           <div class="stat-card">
-            <h3 id="stat-contacts">0</h3>
-            <p>Total Contacts</p>
+            <div class="stat-icon" style="color: #10b981; background: rgba(16, 185, 129, 0.1);"><i class="fa-solid fa-users"></i></div>
+            <div class="stat-info">
+              <h3 id="stat-contacts">0</h3>
+              <p>Total Contacts</p>
+            </div>
           </div>
           <div class="stat-card">
-            <h3 id="stat-appointments">0</h3>
-            <p>Appointments Scheduled</p>
+            <div class="stat-icon" style="color: #8b5cf6; background: rgba(139, 92, 246, 0.1);"><i class="fa-solid fa-calendar-check"></i></div>
+            <div class="stat-info">
+              <h3 id="stat-appointments">0</h3>
+              <p>Appointments Scheduled</p>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- TAB 2: INBOX -->
-      <div id="tab-inbox" class="tab-pane">
+      <section id="tab-inbox" class="tab-pane no-padding">
         <div class="inbox-layout">
           <div class="inbox-sidebar">
+            <div class="inbox-header-sm">Chats</div>
             <ul id="contact-list"></ul>
           </div>
           <div class="chat-area">
@@ -64,81 +146,92 @@
             <div class="chat-history" id="chat-history"></div>
             <div class="chat-input-area">
               <input type="text" id="manual-message" placeholder="Type a manual message (pauses AI)..." disabled>
-              <button id="send-btn" disabled>Send</button>
+              <button id="send-btn" disabled><i class="fa-solid fa-paper-plane"></i></button>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- TAB 3: CONTACTS -->
-      <div id="tab-contacts" class="tab-pane">
-        <div class="header">
-          <h1>CRM Contacts</h1>
-          <p>Save customer names and notes to your database.</p>
+      <section id="tab-contacts" class="tab-pane">
+        <div class="page-head">
+          <div>
+            <h1>Accounts CRM</h1>
+            <p>Save customer names and notes to your database.</p>
+          </div>
         </div>
         <div class="card">
-          <table id="contacts-table">
-            <thead>
-              <tr>
-                <th>Phone Number</th>
-                <th>Name</th>
-                <th>Notes</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-responsive">
+            <table id="contacts-table">
+              <thead>
+                <tr>
+                  <th>Phone Number</th>
+                  <th>Name</th>
+                  <th>Notes</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </section>
 
       <!-- TAB 4: APPOINTMENTS -->
-      <div id="tab-appointments" class="tab-pane">
-        <div class="header">
-          <h1>Appointments & AI Reminders</h1>
-          <p>When you schedule an appointment here, the AI will automatically text them 24 hours before!</p>
+      <section id="tab-appointments" class="tab-pane">
+        <div class="page-head">
+          <div>
+            <h1>Scheduler & AI Reminders</h1>
+            <p>When you schedule an appointment here, Harry Chatbot Ai will automatically text them 24 hours before!</p>
+          </div>
         </div>
-        <div class="card">
-          <form id="appointment-form">
-            <div class="form-group">
-              <label>Phone Number (with country code)</label>
-              <input type="text" id="appt-phone" required placeholder="e.g. 15551234567">
-            </div>
-            <div class="form-group">
-              <label>Date & Time</label>
-              <input type="datetime-local" id="appt-date" required>
+        <div class="card" style="margin-bottom: 24px;">
+          <form id="appointment-form" class="modern-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Phone Number (with country code)</label>
+                <input type="text" id="appt-phone" required placeholder="e.g. 15551234567">
+              </div>
+              <div class="form-group">
+                <label>Date & Time</label>
+                <input type="datetime-local" id="appt-date" required>
+              </div>
             </div>
             <div class="form-group">
               <label>Reason for Appointment</label>
               <input type="text" id="appt-reason" required placeholder="e.g. Consultation at 3PM">
             </div>
-            <button type="submit">Schedule & Enable AI Reminder</button>
+            <button type="submit" class="btn-primary">Schedule & Enable AI Reminder</button>
           </form>
-        </div>
-        <div class="card" style="margin-top: 20px;">
-          <h3>Upcoming Appointments</h3>
-          <ul id="appointment-list" class="simple-list"></ul>
-        </div>
-      </div>
-
-      <!-- TAB 5: SETTINGS -->
-      <div id="tab-settings" class="tab-pane">
-        <div class="header">
-          <h1>Bot Settings</h1>
-          <p>Change how your AI Sales Assistant behaves.</p>
         </div>
         <div class="card">
-          <form id="settings-form">
+          <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Upcoming Appointments</h3>
+          <ul id="appointment-list" class="simple-list"></ul>
+        </div>
+      </section>
+
+      <!-- TAB 5: SETTINGS -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="page-head">
+          <div>
+            <h1>Settings</h1>
+            <p>Change how your AI Sales Assistant behaves.</p>
+          </div>
+        </div>
+        <div class="card">
+          <form id="settings-form" class="modern-form">
             <div class="form-group">
               <label>System Prompt (AI Personality & Instructions)</label>
-              <textarea id="setting-prompt" rows="12" required></textarea>
+              <textarea id="setting-prompt" rows="10" required></textarea>
             </div>
-            <button type="submit">Save Settings</button>
+            <button type="submit" class="btn-primary">Save Settings</button>
           </form>
         </div>
-      </div>
+      </section>
 
-    </div>
+    </main>
   </div>
+
   <script src="script.js"></script>
 </body>
 </html>
