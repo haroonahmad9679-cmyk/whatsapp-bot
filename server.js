@@ -184,7 +184,42 @@ app.post('/webhook', async (req, res) => {
 
       try {
         const sysPrompt = await getSystemPrompt();
-        const finalPrompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: If you want to offer the user clickable buttons (maximum 3), append them to the end of your message in this exact format: [BUTTON: Option 1] [BUTTON: Option 2]. Button text MUST be 20 characters or less.";
+        const finalPrompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: You may offer clickable buttons (maximum 3) by appending them to the end of your message in this exact format: [BUTTON: Option 1] [BUTTON: Option 2]. ONLY do this when initially welcoming the user or explicitly presenting a menu. DO NOT append buttons to every conversational reply. Keep the conversation natural.";
+        
+        // Fetch conversational history to provide continuity
+        const recentMsgs = await pool.query(`SELECT direction, message FROM messages WHERE phone_number = $1 ORDER BY timestamp DESC LIMIT 15`, [from]);
+        const orderedMsgs = recentMsgs.rows.reverse(); // oldest to newest
+        
+        let mergedHistory = [];
+        let currentRole = null;
+        let currentText = "";
+        
+        for (const row of orderedMsgs) {
+           const role = row.direction === 'inbound' ? 'user' : 'model';
+           if (role === currentRole) {
+               currentText += "\n" + row.message;
+           } else {
+               if (currentRole !== null) {
+                   mergedHistory.push({ role: currentRole, parts: [{ text: currentText }] });
+               }
+               currentRole = role;
+               currentText = row.message;
+           }
+        }
+        if (currentRole !== null) {
+            mergedHistory.push({ role: currentRole, parts: [{ text: currentText }] });
+        }
+        
+        // Gemini strict rule: history must alternate [user, model, user, model] and MUST end with a model response before we send the next user message
+        if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === 'user') {
+            mergedHistory.push({ role: 'model', parts: [{ text: "Noted." }] });
+        }
+
+        const chatHistory = [
+          { role: "user", parts: [{ text: finalPrompt }] },
+          { role: "model", parts: [{ text: "Understood. I will follow those instructions and remember the context." }] },
+          ...mergedHistory
+        ];
         
         const modelsToTry = await getValidModelsList();
         let aiResponse = null;
@@ -195,10 +230,7 @@ app.post('/webhook', async (req, res) => {
             const model = genAI.getGenerativeModel({ model: modelName });
             
             const chat = model.startChat({
-              history: [
-                { role: "user", parts: [{ text: finalPrompt }] },
-                { role: "model", parts: [{ text: "Understood." }] },
-              ]
+              history: chatHistory
             });
             
             const result = await chat.sendMessage(msgBody);
