@@ -238,7 +238,9 @@ app.post('/webhook', async (req, res) => {
             aiResponse = responseData.text();
             
             break; 
-          } catch (e) { console.log(e.message); }
+          } catch (e) { 
+            // Silently fallback to the next model without cluttering Render logs with 404/429 errors
+          }
         }
 
         if (!aiResponse) throw new Error("All available Gemini models failed.");
