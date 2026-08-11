@@ -54,18 +54,7 @@ async function getSystemPrompt() {
 
 let cachedModels = [];
 async function getValidModelsList() {
-  if (cachedModels.length > 0) return cachedModels;
-  try {
-    const response = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
-    const models = response.data.models;
-    const valid = models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'));
-    cachedModels = valid.map(m => m.name.replace('models/', '')).sort((a, b) => {
-      if (a.includes('flash') && !b.includes('flash')) return -1;
-      if (!a.includes('flash') && b.includes('flash')) return 1;
-      return 0;
-    });
-    return cachedModels;
-  } catch (err) { return ["gemini-1.5-flash", "gemini-pro"]; }
+  return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
 }
 
 // -----------------------------------------
