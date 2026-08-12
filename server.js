@@ -7,6 +7,10 @@ const { Pool } = require('pg');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 app.use(bodyParser.json());
@@ -74,8 +78,13 @@ async function logMessage(accountId, phone_number, direction, message) {
 async function getSystemPrompt(accountId) {
   try {
     const res = await pool.query(`SELECT value FROM settings WHERE key = 'system_prompt' AND account_id = $1`, [accountId]);
-    if (res.rows.length > 0) return res.rows[0].value;
-    return "You are a helpful AI assistant.";
+    let basePrompt = res.rows.length > 0 ? res.rows[0].value : "You are a helpful AI assistant.";
+    
+    const kbRes = await pool.query(`SELECT value FROM settings WHERE key = 'pdf_knowledge' AND account_id = $1`, [accountId]);
+    if (kbRes.rows.length > 0 && kbRes.rows[0].value) {
+       basePrompt += "\n\nCRITICAL KNOWLEDGE BASE: Use the following information to answer customer questions accurately:\n" + kbRes.rows[0].value;
+    }
+    return basePrompt;
   } catch (err) { return "You are a helpful AI assistant."; }
 }
 
@@ -127,6 +136,30 @@ app.post('/api/login', async (req, res) => {
     }
     res.status(401).json({ error: "Invalid credentials" });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/register', async (req, res) => {
+  const { company_name, email, password } = req.body;
+  if (!company_name || !email || !password) return res.status(400).json({ error: "Missing fields" });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    // For phase 10, default to the server's master phone ID if they don't provide one right away
+    const defaultPhoneId = process.env.PHONE_NUMBER_ID || "1162096826996318";
+    
+    const result = await pool.query(
+      `INSERT INTO accounts (company_name, email, password_hash, whatsapp_phone_id) VALUES ($1, $2, $3, $4) RETURNING id, email`,
+      [company_name, email, hash, defaultPhoneId]
+    );
+    
+    const user = result.rows[0];
+    const token = jwt.sign({ accountId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token });
+  } catch (err) {
+    if (err.code === '23505') { // Postgres unique violation
+      return res.status(409).json({ error: "Email already exists" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -218,9 +251,25 @@ app.post('/api/settings', authenticateJWT, async (req, res) => {
   const accountId = req.user.accountId;
   const { system_prompt } = req.body;
   try {
-    await pool.query(`INSERT INTO settings (account_id, key, value) VALUES ($1, 'system_prompt', $2) ON CONFLICT(key, account_id) DO UPDATE SET value=EXCLUDED.value`, [accountId, system_prompt]);
+    await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('system_prompt', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, system_prompt]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PDF Knowledge Base Upload Endpoint
+app.post('/api/upload-pdf', authenticateJWT, upload.single('pdfFile'), async (req, res) => {
+  const accountId = req.user.accountId;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+  
+  try {
+    const pdfData = await pdfParse(req.file.buffer);
+    const extractedText = pdfData.text.substring(0, 50000); // Limit to 50k chars just to be safe for DB
+    
+    await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('pdf_knowledge', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, extractedText]);
+    res.json({ success: true, textLength: extractedText.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to parse PDF: ' + err.message });
+  }
 });
 
 

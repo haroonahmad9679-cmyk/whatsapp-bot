@@ -39,6 +39,48 @@ document.getElementById('login-form').onsubmit = async (e) => {
   }
 };
 
+document.getElementById('show-register').onclick = (e) => {
+  e.preventDefault();
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('register-view').style.display = 'block';
+};
+
+document.getElementById('show-login').onclick = (e) => {
+  e.preventDefault();
+  document.getElementById('register-view').style.display = 'none';
+  document.getElementById('login-view').style.display = 'block';
+};
+
+document.getElementById('register-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const company_name = document.getElementById('reg-company').value;
+  const email = document.getElementById('reg-email').value;
+  const password = document.getElementById('reg-password').value;
+  
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_name, email, password })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      authToken = data.token;
+      localStorage.setItem('harry_bot_token', authToken);
+      loginOverlay.style.display = 'none';
+      appContainer.style.display = 'flex';
+      loadTabData('tab-dashboard');
+    } else if (res.status === 409) {
+      alert("An account with this email already exists.");
+    } else {
+      alert("Registration failed. Please check your inputs.");
+    }
+  } catch (err) {
+    alert("Registration failed.");
+  }
+};
+
 // API WRAPPER TO INJECT JWT
 async function apiFetch(url, options = {}) {
   if (!authToken) return null;
@@ -168,11 +210,15 @@ document.getElementById('send-btn').onclick = async () => {
   history.appendChild(div);
   history.scrollTop = history.scrollHeight;
 
-  await apiFetch('/api/send', {
+  const res = await apiFetch('/api/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to: currentNumber, message: msg })
   });
+  
+  if (res && !res.ok) {
+    alert("Failed to send message! Your Meta WhatsApp Token may have expired. Please check your Render logs.");
+  }
 };
 
 document.getElementById('manual-message').addEventListener('keypress', (e) => {
@@ -247,7 +293,7 @@ document.getElementById('appointment-form').onsubmit = async (e) => {
   fetchAppointments();
 };
 
-// TAB 5: SETTINGS
+// TAB 5: SETTINGS & KNOWLEDGE BASE
 async function fetchSettings() {
   const res = await apiFetch('/api/settings');
   if (!res) return;
@@ -263,6 +309,40 @@ document.getElementById('settings-form').onsubmit = async (e) => {
     body: JSON.stringify({ system_prompt: prompt })
   });
   alert('Settings Saved!');
+};
+
+document.getElementById('pdf-upload-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('pdf-file');
+  if (fileInput.files.length === 0) return;
+  
+  const formData = new FormData();
+  formData.append('pdfFile', fileInput.files[0]);
+  
+  const btn = document.getElementById('pdf-upload-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Uploading...';
+  btn.disabled = true;
+  
+  try {
+    const res = await apiFetch('/api/upload-pdf', {
+      method: 'POST',
+      body: formData // Note: When using FormData, do not set 'Content-Type' header, browser does it automatically with boundaries
+    });
+    
+    if (res && res.ok) {
+      document.getElementById('pdf-upload-status').style.display = 'block';
+      setTimeout(() => { document.getElementById('pdf-upload-status').style.display = 'none'; }, 5000);
+      fileInput.value = '';
+    } else {
+      alert("Failed to upload PDF.");
+    }
+  } catch (err) {
+    alert("Upload error.");
+  }
+  
+  btn.textContent = originalText;
+  btn.disabled = false;
 };
 
 // Polling for Inbox
