@@ -302,7 +302,7 @@ app.post('/webhook', async (req, res) => {
         msgBody = msgObj.text.body;
       } else if (msgObj.type === 'interactive' && msgObj.interactive.type === 'button_reply') {
         msgBody = msgObj.interactive.button_reply.title;
-      } else if (msgObj.type === 'audio') {
+      } else if (msgObj.type === 'audio' || msgObj.type === 'voice') {
         msgBody = "🎤 [Voice Note Received]";
       }
 
@@ -351,10 +351,11 @@ app.post('/webhook', async (req, res) => {
           ...mergedHistory
         ];
         
-        // If it's an audio message, fetch the binary data from Meta and build a multimodal payload
-        if (msgObj.type === 'audio') {
+        // If it's an audio or voice message, fetch the binary data from Meta and build a multimodal payload
+        if (msgObj.type === 'audio' || msgObj.type === 'voice') {
           try {
-            const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${msgObj.audio.id}`, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const mediaObj = msgObj.type === 'voice' ? msgObj.voice : msgObj.audio;
+            const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${mediaObj.id}`, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
             const mediaUrl = mediaRes.data.url;
             
             const audioDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
@@ -362,7 +363,7 @@ app.post('/webhook', async (req, res) => {
             
             aiInput = [
               { text: "Listen to the following voice note from the user and respond appropriately:" },
-              { inlineData: { data: base64Audio, mimeType: msgObj.audio.mime_type || "audio/ogg" } }
+              { inlineData: { data: base64Audio, mimeType: mediaObj.mime_type || "audio/ogg" } }
             ];
           } catch (audioErr) {
              console.error("Audio download failed:", audioErr.message);
