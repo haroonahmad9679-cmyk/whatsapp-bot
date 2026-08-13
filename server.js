@@ -296,10 +296,14 @@ app.post('/webhook', async (req, res) => {
       const from = body.entry[0].changes[0].value.messages[0].from; 
       const msgObj = body.entry[0].changes[0].value.messages[0];
       let msgBody = "Received a non-text message";
+      let aiInput = null;
+
       if (msgObj.type === 'text') {
         msgBody = msgObj.text.body;
       } else if (msgObj.type === 'interactive' && msgObj.interactive.type === 'button_reply') {
         msgBody = msgObj.interactive.button_reply.title;
+      } else if (msgObj.type === 'audio') {
+        msgBody = "🎤 [Voice Note Received]";
       }
 
       res.sendStatus(200); 
@@ -347,6 +351,25 @@ app.post('/webhook', async (req, res) => {
           ...mergedHistory
         ];
         
+        // If it's an audio message, fetch the binary data from Meta and build a multimodal payload
+        if (msgObj.type === 'audio') {
+          try {
+            const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${msgObj.audio.id}`, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const mediaUrl = mediaRes.data.url;
+            
+            const audioDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const base64Audio = Buffer.from(audioDataRes.data, 'binary').toString('base64');
+            
+            aiInput = [
+              { text: "Listen to the following voice note from the user and respond appropriately:" },
+              { inlineData: { data: base64Audio, mimeType: msgObj.audio.mime_type || "audio/ogg" } }
+            ];
+          } catch (audioErr) {
+             console.error("Audio download failed:", audioErr.message);
+             aiInput = "The user sent a voice note, but I failed to download it. Ask them to type it instead.";
+          }
+        }
+
         const modelsToTry = await getValidModelsList();
         let aiResponse = null;
 
@@ -355,9 +378,10 @@ app.post('/webhook', async (req, res) => {
             const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
             const model = genAI.getGenerativeModel({ model: modelName });
             const chat = model.startChat({ history: chatHistory });
-            const result = await chat.sendMessage(msgBody);
+            const result = await chat.sendMessage(aiInput || msgBody);
             aiResponse = result.response.text();
             break; 
+
           } catch (e) { 
              // Silently fallback
           }
