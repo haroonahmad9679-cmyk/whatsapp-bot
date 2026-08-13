@@ -304,6 +304,8 @@ app.post('/webhook', async (req, res) => {
         msgBody = msgObj.interactive.button_reply.title;
       } else if (msgObj.type === 'audio' || msgObj.type === 'voice') {
         msgBody = "🎤 [Voice Note Received]";
+      } else if (msgObj.type === 'image') {
+        msgBody = "📷 [Image Received]";
       }
 
       res.sendStatus(200); 
@@ -352,22 +354,26 @@ app.post('/webhook', async (req, res) => {
         ];
         
         // If it's an audio or voice message, fetch the binary data from Meta and build a multimodal payload
-        if (msgObj.type === 'audio' || msgObj.type === 'voice') {
+        if (msgObj.type === 'audio' || msgObj.type === 'voice' || msgObj.type === 'image') {
           try {
-            const mediaObj = msgObj.type === 'voice' ? msgObj.voice : msgObj.audio;
+            const mediaObj = msgObj.type === 'image' ? msgObj.image : (msgObj.type === 'voice' ? msgObj.voice : msgObj.audio);
             const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${mediaObj.id}`, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
             const mediaUrl = mediaRes.data.url;
             
-            const audioDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-            const base64Audio = Buffer.from(audioDataRes.data, 'binary').toString('base64');
+            const mediaDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const base64Media = Buffer.from(mediaDataRes.data, 'binary').toString('base64');
             
+            const promptText = msgObj.type === 'image' 
+               ? "Examine the following image sent by the user and respond appropriately:" 
+               : "Listen to the following voice note from the user and respond appropriately:";
+               
             aiInput = [
-              { text: "Listen to the following voice note from the user and respond appropriately:" },
-              { inlineData: { data: base64Audio, mimeType: mediaObj.mime_type || "audio/ogg" } }
+              { text: promptText },
+              { inlineData: { data: base64Media, mimeType: mediaObj.mime_type || (msgObj.type === 'image' ? "image/jpeg" : "audio/ogg") } }
             ];
-          } catch (audioErr) {
-             console.error("Audio download failed:", audioErr.message);
-             aiInput = "The user sent a voice note, but I failed to download it. Ask them to type it instead.";
+          } catch (mediaErr) {
+             console.error("Media download failed:", mediaErr.message);
+             aiInput = "The user sent a media file, but I failed to download it. Ask them to type it instead.";
           }
         }
 
