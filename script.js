@@ -141,11 +141,45 @@ async function fetchStats() {
     
     window.activityChartInstance = new Chart(ctx, {
       type: 'bar',
-      data: { labels, datasets: [{ label: 'Messages', data: counts, backgroundColor: '#3b82f6', borderRadius: 4 }] },
-      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+      data: { 
+        labels, 
+        datasets: [{ 
+          label: 'Messages', 
+          data: counts, 
+          backgroundColor: '#00f0ff', // Cyber Neon Cyan
+          borderColor: '#00f0ff',
+          borderWidth: 1,
+          borderRadius: 4,
+          hoverBackgroundColor: '#ff00ff', // Cyber Neon Magenta on hover
+          hoverBorderColor: '#ff00ff'
+        }] 
+      },
+      options: { 
+        responsive: true, 
+        plugins: { 
+          legend: { display: false } 
+        }, 
+        scales: { 
+          y: { 
+            beginAtZero: true, 
+            ticks: { precision: 0, color: '#9ca3af' },
+            grid: { color: 'rgba(255, 255, 255, 0.05)' }
+          },
+          x: {
+            ticks: { color: '#9ca3af' },
+            grid: { display: false }
+          }
+        } 
+      }
     });
   } catch (e) { console.error(e); }
 }
+
+// LOGOUT BUTTON
+document.getElementById('logout-btn').onclick = () => {
+  localStorage.removeItem('harry_bot_token');
+  window.location.reload();
+};
 
 // TAB 2: INBOX
 let currentNumber = null;
