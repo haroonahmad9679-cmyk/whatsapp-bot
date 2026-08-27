@@ -126,6 +126,9 @@ async function fetchStats() {
     const data = await res.json();
     document.getElementById('stat-messages').textContent = data.totalMessages;
     document.getElementById('stat-hotleads').textContent = data.hotLeads;
+    if (document.getElementById('stat-visitors')) {
+       document.getElementById('stat-visitors').textContent = data.totalVisitors;
+    }
     
     const cRes = await apiFetch('/api/stats');
     if (cRes) {
@@ -156,6 +159,50 @@ async function fetchStats() {
       },
       options: { 
         responsive: true, 
+        onClick: async (e, elements) => {
+          if (elements.length > 0) {
+            const index = elements[0].index;
+            const rawDate = data.activity[index].date;
+            const formattedDate = new Date(rawDate).toISOString().split('T')[0];
+            
+            document.getElementById('analytics-modal').style.display = 'flex';
+            document.getElementById('analytics-modal-title').textContent = `Activity for ${labels[index]}`;
+            document.getElementById('analytics-modal-content').innerHTML = '<p style="text-align:center; color:#9ca3af;">Loading...</p>';
+            
+            try {
+              const res = await apiFetch(`/api/analytics/date?date=${formattedDate}`);
+              const msgs = await res.json();
+              
+              if (msgs.length === 0) {
+                 document.getElementById('analytics-modal-content').innerHTML = '<p style="text-align:center; color:#9ca3af;">No activity recorded.</p>';
+                 return;
+              }
+              
+              let html = '<div style="display:flex; flex-direction:column; gap:12px;">';
+              msgs.forEach(m => {
+                 const badge = m.lead_score === 'Hot' ? '<span class="badge-hot" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.3); font-size:10px; padding:2px 6px; border-radius:12px; margin-left:8px;">HOT</span>' : '';
+                 const name = m.name || m.phone_number;
+                 const dirColor = m.direction === 'inbound' ? '#10b981' : '#00f0ff';
+                 const dirIcon = m.direction === 'inbound' ? 'fa-arrow-down' : 'fa-arrow-up';
+                 const time = new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                 
+                 html += `
+                   <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 8px;">
+                     <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                       <strong style="color:#fff;">${name} ${badge}</strong>
+                       <span style="color:#9ca3af; font-size:12px;"><i class="fa-solid ${dirIcon}" style="color:${dirColor}"></i> ${time}</span>
+                     </div>
+                     <p style="color:#d1d5db; margin:0; font-size:14px; white-space:pre-wrap;">${m.message}</p>
+                   </div>
+                 `;
+               });
+               html += '</div>';
+               document.getElementById('analytics-modal-content').innerHTML = html;
+            } catch(e) {
+               document.getElementById('analytics-modal-content').innerHTML = '<p style="text-align:center; color:#ef4444;">Error loading data.</p>';
+            }
+          }
+        },
         plugins: { 
           legend: { display: false } 
         }, 
@@ -424,3 +471,36 @@ setInterval(() => {
     }
   }
 }, 3000);
+
+// -----------------------------------------
+// VISITORS MODAL LOGIC
+// -----------------------------------------
+async function fetchVisitorData() {
+  document.getElementById('visitors-modal').style.display = 'flex';
+  document.getElementById('visitors-modal-content').innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px; color:#9ca3af;">Loading...</td></tr>';
+  
+  try {
+    const res = await apiFetch('/api/visitors');
+    const data = await res.json();
+    
+    if (data.length === 0) {
+      document.getElementById('visitors-modal-content').innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px; color:#9ca3af;">No visitors recorded yet.</td></tr>';
+      return;
+    }
+    
+    let html = '';
+    data.forEach(v => {
+      const dateStr = new Date(v.visited_at).toLocaleString();
+      html += `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 12px; font-size: 14px;">${dateStr}</td>
+          <td style="padding: 12px; font-size: 14px; font-family: monospace; color: #f59e0b;">${v.ip_address}</td>
+          <td style="padding: 12px; font-size: 12px; color: #9ca3af;">${v.user_agent}</td>
+        </tr>
+      `;
+    });
+    document.getElementById('visitors-modal-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('visitors-modal-content').innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px; color:#ef4444;">Failed to load data.</td></tr>';
+  }
+}

@@ -16,6 +16,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 app.use(bodyParser.json());
 
+// Track all visitors to the dashboard
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path === '/dashboard') {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const ua = req.headers['user-agent'] || 'Unknown';
+    if (pool) {
+       pool.query(`INSERT INTO visitors (ip_address, user_agent) VALUES ($1, $2)`, [ip, ua]).catch(() => {});
+    }
+  }
+  next();
+});
+
 // Serve the frontend dashboard
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, 'style.css')));
@@ -67,9 +79,11 @@ async function initDB() {
     try { await pool.query(`ALTER TABLE settings DROP CONSTRAINT settings_pkey CASCADE`); } catch(e){}
     try { await pool.query(`ALTER TABLE settings ADD CONSTRAINT settings_pkey PRIMARY KEY (key, account_id)`); } catch(e){}
 
+    await pool.query(`CREATE TABLE IF NOT EXISTS visitors (id SERIAL PRIMARY KEY, ip_address TEXT, user_agent TEXT, visited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+
     // Enable Row Level Security (RLS) on all tables to secure them in Supabase
     // This prevents anonymous access via the Supabase Data API, but allows our backend (using postgres role) to still read/write data.
-    const tables = ['accounts', 'messages', 'contacts', 'appointments', 'settings'];
+    const tables = ['accounts', 'messages', 'contacts', 'appointments', 'settings', 'visitors'];
     for (const table of tables) {
       await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     }
@@ -249,6 +263,7 @@ app.get('/api/analytics', authenticateJWT, async (req, res) => {
   try {
     const msgCountRes = await pool.query(`SELECT COUNT(*) FROM messages WHERE account_id = $1`, [accountId]);
     const leadCountRes = await pool.query(`SELECT COUNT(*) FROM contacts WHERE account_id = $1 AND lead_score = 'Hot'`, [accountId]);
+    const visitorCountRes = await pool.query(`SELECT COUNT(*) FROM visitors`);
     const recentMsgs = await pool.query(`
       SELECT DATE(timestamp) as date, COUNT(*) as count 
       FROM messages 
@@ -260,8 +275,31 @@ app.get('/api/analytics', authenticateJWT, async (req, res) => {
     res.json({
       totalMessages: parseInt(msgCountRes.rows[0].count),
       hotLeads: parseInt(leadCountRes.rows[0].count),
+      totalVisitors: parseInt(visitorCountRes.rows[0].count),
       activity: recentMsgs.rows
     });
+  } catch(err) { res.status(500).json({error: err.message}); }
+});
+
+app.get('/api/analytics/date', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  const date = req.query.date;
+  try {
+    const result = await pool.query(`
+      SELECT m.phone_number, m.direction, m.message, m.timestamp, c.name, c.lead_score
+      FROM messages m
+      LEFT JOIN contacts c ON m.phone_number = c.phone_number AND m.account_id = c.account_id
+      WHERE m.account_id = $1 AND DATE(m.timestamp) = $2
+      ORDER BY m.timestamp DESC
+    `, [accountId, date]);
+    res.json(result.rows);
+  } catch(err) { res.status(500).json({error: err.message}); }
+});
+
+app.get('/api/visitors', authenticateJWT, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM visitors ORDER BY visited_at DESC LIMIT 100`);
+    res.json(result.rows);
   } catch(err) { res.status(500).json({error: err.message}); }
 });
 

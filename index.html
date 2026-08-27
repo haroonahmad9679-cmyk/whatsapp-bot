@@ -66,6 +66,43 @@
     </div>
   </div>
 
+  <!-- ANALYTICS MODAL -->
+  <div id="analytics-modal" class="login-overlay" style="display: none; z-index: 1000;">
+    <div class="login-card" style="max-width: 600px; width: 90%; max-height: 80vh; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 id="analytics-modal-title" style="margin: 0;">Activity for Date</h2>
+        <button onclick="document.getElementById('analytics-modal').style.display='none'" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 20px;"><i class="fa-solid fa-times"></i></button>
+      </div>
+      <div id="analytics-modal-content" style="overflow-y: auto; flex: 1; padding-right: 8px;">
+        <!-- Logs go here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- VISITORS MODAL -->
+  <div id="visitors-modal" class="login-overlay" style="display: none; z-index: 1000;">
+    <div class="login-card" style="max-width: 800px; width: 90%; max-height: 80vh; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0;">Dashboard Visitor Log</h2>
+        <button onclick="document.getElementById('visitors-modal').style.display='none'" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 20px;"><i class="fa-solid fa-times"></i></button>
+      </div>
+      <div class="table-responsive" style="flex: 1; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; color: #fff;">
+          <thead>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left;">
+              <th style="padding: 12px; color: #9ca3af;">Date</th>
+              <th style="padding: 12px; color: #9ca3af;">IP Address</th>
+              <th style="padding: 12px; color: #9ca3af;">Browser / Device</th>
+            </tr>
+          </thead>
+          <tbody id="visitors-modal-content">
+             <!-- Table rows go here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div id="app" class="app" style="display: none;">
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -184,6 +221,16 @@
             <div class="stat-info">
               <h3 id="stat-contacts">0</h3>
               <p>Total Contacts</p>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <div class="stat-icon" style="color: #f59e0b; background: rgba(245, 158, 11, 0.1);"><i class="fa-solid fa-eye"></i></div>
+              <button onclick="fetchVisitorData()" style="font-size:12px; background:rgba(245, 158, 11, 0.1); border:1px solid rgba(245, 158, 11, 0.3); color:#f59e0b; border-radius:4px; cursor:pointer; padding: 4px 8px;">View Data</button>
+            </div>
+            <div class="stat-info" style="margin-top: 12px;">
+              <h3 id="stat-visitors">0</h3>
+              <p>Site Visitors</p>
             </div>
           </div>
         </div>
