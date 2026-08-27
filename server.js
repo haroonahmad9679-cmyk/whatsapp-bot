@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+const cron = require('node-cron');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -50,6 +51,8 @@ async function initDB() {
     await pool.query(`CREATE TABLE IF NOT EXISTS contacts (phone_number TEXT, account_id INTEGER REFERENCES accounts(id), name TEXT, notes TEXT, lead_score TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
     try { await pool.query(`ALTER TABLE contacts ADD COLUMN account_id INTEGER REFERENCES accounts(id)`); } catch(e){}
     try { await pool.query(`ALTER TABLE contacts ADD COLUMN lead_score TEXT DEFAULT 'Cold'`); } catch(e){}
+    try { await pool.query(`ALTER TABLE contacts ADD COLUMN bot_active BOOLEAN DEFAULT true`); } catch(e){}
+    try { await pool.query(`ALTER TABLE contacts ADD COLUMN followup_sent INTEGER DEFAULT 0`); } catch(e){}
     await pool.query(`UPDATE contacts SET account_id = 1 WHERE account_id IS NULL`);
     try { await pool.query(`ALTER TABLE contacts DROP CONSTRAINT contacts_pkey CASCADE`); } catch(e){}
     try { await pool.query(`ALTER TABLE contacts ADD CONSTRAINT contacts_pkey PRIMARY KEY (phone_number, account_id)`); } catch(e){}
@@ -63,6 +66,13 @@ async function initDB() {
     await pool.query(`UPDATE settings SET account_id = 1 WHERE account_id IS NULL`);
     try { await pool.query(`ALTER TABLE settings DROP CONSTRAINT settings_pkey CASCADE`); } catch(e){}
     try { await pool.query(`ALTER TABLE settings ADD CONSTRAINT settings_pkey PRIMARY KEY (key, account_id)`); } catch(e){}
+
+    // Enable Row Level Security (RLS) on all tables to secure them in Supabase
+    // This prevents anonymous access via the Supabase Data API, but allows our backend (using postgres role) to still read/write data.
+    const tables = ['accounts', 'messages', 'contacts', 'appointments', 'settings'];
+    for (const table of tables) {
+      await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    }
 
   } catch (err) { console.error("DB Init Error:", err); }
 }
@@ -180,7 +190,7 @@ app.get('/api/stats', authenticateJWT, async (req, res) => {
 app.get('/api/chats', authenticateJWT, async (req, res) => {
   const accountId = req.user.accountId;
   try {
-    const result = await pool.query(`SELECT c.phone_number, c.name, c.lead_score, (SELECT message FROM messages WHERE phone_number = c.phone_number AND account_id = $1 ORDER BY timestamp DESC LIMIT 1) as last_message FROM contacts c WHERE c.account_id = $1 ORDER BY c.created_at DESC`, [accountId]);
+    const result = await pool.query(`SELECT c.phone_number, c.name, c.lead_score, c.bot_active, (SELECT message FROM messages WHERE phone_number = c.phone_number AND account_id = $1 ORDER BY timestamp DESC LIMIT 1) as last_message FROM contacts c WHERE c.account_id = $1 ORDER BY c.created_at DESC`, [accountId]);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -222,6 +232,37 @@ app.post('/api/contacts', authenticateJWT, async (req, res) => {
     await pool.query(`INSERT INTO contacts (account_id, phone_number, name, notes, lead_score) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(phone_number, account_id) DO UPDATE SET name=EXCLUDED.name, notes=EXCLUDED.notes, lead_score=EXCLUDED.lead_score`, [accountId, phone_number, name || '', notes || '', lead_score || 'Cold']);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/contacts/:phone/toggle-ai', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  const phone = req.params.phone;
+  const { bot_active } = req.body;
+  try {
+    await pool.query(`UPDATE contacts SET bot_active = $1 WHERE phone_number = $2 AND account_id = $3`, [bot_active, phone, accountId]);
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({error: err.message}); }
+});
+
+app.get('/api/analytics', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  try {
+    const msgCountRes = await pool.query(`SELECT COUNT(*) FROM messages WHERE account_id = $1`, [accountId]);
+    const leadCountRes = await pool.query(`SELECT COUNT(*) FROM contacts WHERE account_id = $1 AND lead_score = 'Hot'`, [accountId]);
+    const recentMsgs = await pool.query(`
+      SELECT DATE(timestamp) as date, COUNT(*) as count 
+      FROM messages 
+      WHERE account_id = $1 AND timestamp >= NOW() - INTERVAL '7 days' 
+      GROUP BY DATE(timestamp) 
+      ORDER BY DATE(timestamp) ASC
+    `, [accountId]);
+    
+    res.json({
+      totalMessages: parseInt(msgCountRes.rows[0].count),
+      hotLeads: parseInt(leadCountRes.rows[0].count),
+      activity: recentMsgs.rows
+    });
+  } catch(err) { res.status(500).json({error: err.message}); }
 });
 
 app.get('/api/appointments', authenticateJWT, async (req, res) => {
@@ -316,6 +357,13 @@ app.post('/webhook', async (req, res) => {
         const accountId = accResult.rows.length > 0 ? accResult.rows[0].id : 1;
 
         await logMessage(accountId, from, 'inbound', msgBody);
+
+        const contactCheck = await pool.query(`SELECT bot_active FROM contacts WHERE phone_number = $1 AND account_id = $2`, [from, accountId]);
+        const botActive = contactCheck.rows.length > 0 ? contactCheck.rows[0].bot_active : true;
+        
+        if (botActive === false) {
+           return; // Exit early, human is taking over
+        }
 
         const sysPrompt = await getSystemPrompt(accountId);
         const finalPrompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: You may offer clickable buttons (maximum 3) by appending them to the end of your message in this exact format: [BUTTON: Option 1] [BUTTON: Option 2]. ONLY do this when initially welcoming the user or explicitly presenting a menu. DO NOT append buttons to every conversational reply.\n\nLEAD SCORING: If the user shows high buying intent (e.g. asking for prices, wanting to purchase), you MUST append [LEAD: HOT] to the end of your message so the system can notify sales.";
@@ -437,6 +485,63 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
   } else {
     res.sendStatus(404);
+  }
+});
+
+// -----------------------------------------
+// AUTOMATED FOLLOW-UP DRIP CAMPAIGN (CRON)
+// -----------------------------------------
+cron.schedule('0 * * * *', async () => {
+  console.log("Running hourly check for Hot Leads follow-ups...");
+  try {
+    // Find Hot leads who haven't had a message in the last 48 hours, and haven't received a follow-up yet.
+    // Also ensuring bot_active is true.
+    const leads = await pool.query(`
+      SELECT c.phone_number, c.account_id, c.name, a.whatsapp_phone_id
+      FROM contacts c
+      JOIN accounts a ON c.account_id = a.id
+      WHERE c.lead_score = 'Hot' 
+        AND c.bot_active = true 
+        AND c.followup_sent = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m 
+          WHERE m.phone_number = c.phone_number 
+            AND m.account_id = c.account_id 
+            AND m.timestamp > NOW() - INTERVAL '48 hours'
+        )
+    `);
+
+    for (const lead of leads.rows) {
+      try {
+        const sysPrompt = await getSystemPrompt(lead.account_id);
+        const prompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: Generate a very short, friendly check-in message for this user. DO NOT offer any discounts or deals unless explicitly told to. Just ask if they have any more questions about the products they were looking at.";
+        
+        const modelsToTry = await getValidModelsList();
+        let aiResponse = null;
+        for (const modelName of modelsToTry) {
+           try {
+             const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+             const model = genAI.getGenerativeModel({ model: modelName });
+             const chat = model.startChat({ history: [{ role: 'user', parts: [{ text: prompt }] }] });
+             const result = await chat.sendMessage("Write a quick friendly follow-up message to check in on my interest.");
+             aiResponse = result.response.text();
+             break;
+           } catch(e) {}
+        }
+        
+        if (aiResponse) {
+          const phoneNumberId = lead.whatsapp_phone_id || process.env.PHONE_NUMBER_ID || "1162096826996318";
+          await axios({ method: 'POST', url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }, data: { messaging_product: 'whatsapp', to: lead.phone_number, type: 'text', text: { body: aiResponse } } });
+          await logMessage(lead.account_id, lead.phone_number, 'outbound', aiResponse);
+          await pool.query(`UPDATE contacts SET followup_sent = 1 WHERE phone_number = $1 AND account_id = $2`, [lead.phone_number, lead.account_id]);
+          console.log(`Sent automated follow-up to ${lead.phone_number}`);
+        }
+      } catch (err) {
+        console.error("Follow-up error for lead", lead.phone_number, err.message);
+      }
+    }
+  } catch (err) {
+    console.error("Cron Job Error:", err);
   }
 });
 

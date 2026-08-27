@@ -121,13 +121,30 @@ function loadTabData(tabId) {
 // TAB 1: DASHBOARD
 async function fetchStats() {
   try {
-    const res = await apiFetch('/api/stats');
+    const res = await apiFetch('/api/analytics');
     if (!res) return;
     const data = await res.json();
-    document.getElementById('stat-messages').textContent = data.total_messages;
-    document.getElementById('stat-contacts').textContent = data.total_contacts;
-    document.getElementById('stat-appointments').textContent = data.total_appointments;
-  } catch (e) {}
+    document.getElementById('stat-messages').textContent = data.totalMessages;
+    document.getElementById('stat-hotleads').textContent = data.hotLeads;
+    
+    const cRes = await apiFetch('/api/stats');
+    if (cRes) {
+       const cData = await cRes.json();
+       document.getElementById('stat-contacts').textContent = cData.total_contacts;
+    }
+    
+    if (window.activityChartInstance) window.activityChartInstance.destroy();
+    
+    const ctx = document.getElementById('activityChart').getContext('2d');
+    const labels = data.activity.map(a => new Date(a.date).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}));
+    const counts = data.activity.map(a => a.count);
+    
+    window.activityChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Messages', data: counts, backgroundColor: '#3b82f6', borderRadius: 4 }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+  } catch (e) { console.error(e); }
 }
 
 // TAB 2: INBOX
@@ -165,13 +182,13 @@ async function fetchInboxContacts() {
       
       li.appendChild(nameSpan);
       li.appendChild(previewSpan);
-      li.onclick = () => loadChat(c.phone_number, li, nameSpan.textContent.replace('HOT LEAD 🔥', '').trim());
+      li.onclick = () => loadChat(c.phone_number, li, nameSpan.textContent.replace('HOT LEAD 🔥', '').trim(), c.bot_active);
       list.appendChild(li);
     });
   } catch (e) {}
 }
 
-async function loadChat(number, element, displayName) {
+async function loadChat(number, element, displayName, botActive) {
   currentNumber = number;
   document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
   if (element) element.classList.add('active');
@@ -179,6 +196,24 @@ async function loadChat(number, element, displayName) {
   document.getElementById('current-contact').textContent = `Chat with ${displayName}`;
   document.getElementById('manual-message').disabled = false;
   document.getElementById('send-btn').disabled = false;
+  
+  const toggleContainer = document.getElementById('ai-toggle-container');
+  toggleContainer.style.display = 'flex';
+  
+  const toggleBtn = document.getElementById('toggle-ai-btn');
+  toggleBtn.checked = botActive === undefined ? true : botActive;
+  toggleBtn.onchange = async () => {
+     await apiFetch(`/api/contacts/${number}/toggle-ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_active: toggleBtn.checked })
+     });
+     
+     // Update local state in the UI so if they click away and back it doesn't revert instantly before a refresh
+     if (element) {
+        element.onclick = () => loadChat(number, element, displayName, toggleBtn.checked);
+     }
+  };
 
   try {
     const res = await apiFetch(`/api/chats/${number}`);
