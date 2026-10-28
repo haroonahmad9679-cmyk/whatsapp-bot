@@ -659,21 +659,23 @@ if (launchOnboardBtn) {
       });
 
       // Listen for message events from Meta's Embedded Signup popup
-      const sessionListener = async (event) => {
+      const sessionListener = function(event) {
         if (event.origin && event.origin.includes('facebook.com')) {
           try {
-            const data = JSON.parse(event.data);
+            const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
             if (data.type === 'WA_EMBEDDED_SIGNUP') {
               if (data.event === 'FINISH' && data.data) {
                 const phoneId = data.data.phone_number_id;
                 const wabaId = data.data.waba_id;
                 if (phoneId) {
                   document.getElementById('setting-phone-id').value = phoneId;
-                  await apiFetch('/api/onboarding/save-coexistence', {
+                  apiFetch('/api/onboarding/save-coexistence', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ phone_number_id: phoneId, meta_app_id: appId })
-                  });
+                  }).then(() => {
+                    document.getElementById('test-token-btn').click();
+                  }).catch(() => {});
                 }
               }
             }
@@ -685,29 +687,28 @@ if (launchOnboardBtn) {
 
       statusDiv.textContent = '🚀 Opening Meta authorization popup...';
 
-      window.FB.login(async (response) => {
-        if (response.authResponse) {
+      // Pass standard non-async function callback as required by Meta SDK
+      window.FB.login(function(response) {
+        if (response && response.authResponse) {
           const code = response.authResponse.code;
           statusDiv.style.color = '#10b981';
           statusDiv.textContent = '✅ Coexistence onboarding authorized by Meta! Testing connection...';
 
-          await apiFetch('/api/onboarding/save-coexistence', {
+          apiFetch('/api/onboarding/save-coexistence', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ meta_app_id: appId, code: code })
-          });
-
-          setTimeout(() => {
-            document.getElementById('test-token-btn').click();
-          }, 1500);
+          }).then(() => {
+            setTimeout(() => {
+              document.getElementById('test-token-btn').click();
+            }, 1500);
+          }).catch(() => {});
         } else {
           statusDiv.style.color = '#f59e0b';
-          statusDiv.textContent = 'ℹ️ Onboarding window closed.';
+          statusDiv.textContent = 'ℹ️ Onboarding window closed or cancelled.';
         }
       }, {
-        config_id: '',
-        response_type: 'code',
-        override_default_response_type: true,
+        scope: 'whatsapp_business_management,whatsapp_business_messaging',
         extras: {
           setup: {},
           featureType: 'whatsapp_business_app_onboarding',
