@@ -16,12 +16,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 app.use(bodyParser.json());
 
-// Track all visitors to the dashboard
+// Track real human visitors to the dashboard (filtering out automated bots/crawlers)
 app.use((req, res, next) => {
   if (req.path === '/' || req.path === '/dashboard') {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const ua = req.headers['user-agent'] || 'Unknown';
-    if (pool) {
+    const isBot = /bot|crawl|spider|slurp|censys|shodan|headless|curl|wget|python|go-http|scanner|bytespider|gptbot|semrush|ahrefs|uptime|health|ping/i.test(ua);
+    if (!isBot && pool) {
        pool.query(`INSERT INTO visitors (ip_address, user_agent) VALUES ($1, $2)`, [ip, ua]).catch(() => {});
     }
   }
@@ -198,27 +199,8 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-  const { company_name, email, password } = req.body;
-  if (!company_name || !email || !password) return res.status(400).json({ error: "Missing fields" });
-  try {
-    const hash = await bcrypt.hash(password, 10);
-    // For phase 10, default to the server's master phone ID if they don't provide one right away
-    const defaultPhoneId = process.env.PHONE_NUMBER_ID || "1162096826996318";
-    
-    const result = await pool.query(
-      `INSERT INTO accounts (company_name, email, password_hash, whatsapp_phone_id) VALUES ($1, $2, $3, $4) RETURNING id, email`,
-      [company_name, email, hash, defaultPhoneId]
-    );
-    
-    const user = result.rows[0];
-    const token = jwt.sign({ accountId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token });
-  } catch (err) {
-    if (err.code === '23505') { // Postgres unique violation
-      return res.status(409).json({ error: "Email already exists" });
-    }
-    res.status(500).json({ error: err.message });
-  }
+  // Public registration is disabled on this private system for security
+  res.status(403).json({ error: "Public registration is disabled on this private system." });
 });
 
 // -----------------------------------------
@@ -359,7 +341,15 @@ app.get('/api/analytics', authenticateJWT, async (req, res) => {
   try {
     const msgCountRes = await pool.query(`SELECT COUNT(*) FROM messages WHERE account_id = $1`, [accountId]);
     const leadCountRes = await pool.query(`SELECT COUNT(*) FROM contacts WHERE account_id = $1 AND lead_score = 'Hot'`, [accountId]);
-    const visitorCountRes = await pool.query(`SELECT COUNT(*) FROM visitors`);
+    const visitorCountRes = await pool.query(`
+      SELECT COUNT(*) FROM visitors 
+      WHERE user_agent NOT ILIKE '%bot%' 
+        AND user_agent NOT ILIKE '%crawl%' 
+        AND user_agent NOT ILIKE '%censys%' 
+        AND user_agent NOT ILIKE '%shodan%' 
+        AND user_agent NOT ILIKE '%python%' 
+        AND user_agent NOT ILIKE '%curl%'
+    `);
     const recentMsgs = await pool.query(`
       SELECT DATE(timestamp) as date, COUNT(*) as count 
       FROM messages 
@@ -394,7 +384,17 @@ app.get('/api/analytics/date', authenticateJWT, async (req, res) => {
 
 app.get('/api/visitors', authenticateJWT, async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM visitors ORDER BY visited_at DESC LIMIT 100`);
+    const result = await pool.query(`
+      SELECT * FROM visitors 
+      WHERE user_agent NOT ILIKE '%bot%' 
+        AND user_agent NOT ILIKE '%crawl%' 
+        AND user_agent NOT ILIKE '%censys%' 
+        AND user_agent NOT ILIKE '%shodan%' 
+        AND user_agent NOT ILIKE '%python%' 
+        AND user_agent NOT ILIKE '%curl%'
+      ORDER BY visited_at DESC 
+      LIMIT 100
+    `);
     res.json(result.rows);
   } catch(err) { res.status(500).json({error: err.message}); }
 });

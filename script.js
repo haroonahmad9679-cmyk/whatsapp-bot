@@ -39,48 +39,6 @@ document.getElementById('login-form').onsubmit = async (e) => {
   }
 };
 
-document.getElementById('show-register').onclick = (e) => {
-  e.preventDefault();
-  document.getElementById('login-view').style.display = 'none';
-  document.getElementById('register-view').style.display = 'block';
-};
-
-document.getElementById('show-login').onclick = (e) => {
-  e.preventDefault();
-  document.getElementById('register-view').style.display = 'none';
-  document.getElementById('login-view').style.display = 'block';
-};
-
-document.getElementById('register-form').onsubmit = async (e) => {
-  e.preventDefault();
-  const company_name = document.getElementById('reg-company').value;
-  const email = document.getElementById('reg-email').value;
-  const password = document.getElementById('reg-password').value;
-  
-  try {
-    const res = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company_name, email, password })
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      authToken = data.token;
-      localStorage.setItem('harry_bot_token', authToken);
-      loginOverlay.style.display = 'none';
-      appContainer.style.display = 'flex';
-      loadTabData('tab-dashboard');
-    } else if (res.status === 409) {
-      alert("An account with this email already exists.");
-    } else {
-      alert("Registration failed. Please check your inputs.");
-    }
-  } catch (err) {
-    alert("Registration failed.");
-  }
-};
-
 // API WRAPPER TO INJECT JWT
 async function apiFetch(url, options = {}) {
   if (!authToken) return null;
