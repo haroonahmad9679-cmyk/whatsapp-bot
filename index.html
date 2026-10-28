@@ -103,6 +103,46 @@
     </div>
   </div>
 
+  <!-- SEND TEMPLATE MODAL -->
+  <div id="template-modal" class="login-overlay" style="display: none; z-index: 1000;">
+    <div class="login-card" style="max-width: 520px; width: 90%;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0; font-size: 1.25rem; display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-bolt" style="color: #3b82f6;"></i> Send WhatsApp Template
+        </h2>
+        <button id="close-template-modal-btn" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 20px;"><i class="fa-solid fa-times"></i></button>
+      </div>
+      <p style="color: #9ca3af; font-size: 0.85rem; margin-bottom: 20px; line-height: 1.4;">
+        Meta requires approved templates when initiating conversations or replying after the 24-hour customer window closes.
+      </p>
+      <form id="send-template-form" class="modern-form">
+        <div class="form-group">
+          <label>Recipient Phone</label>
+          <input type="text" id="tpl-phone" readonly style="opacity: 0.8; font-family: monospace;">
+        </div>
+        <div class="form-group">
+          <label>Template Name</label>
+          <input type="text" id="tpl-name" required placeholder="e.g. hello_world">
+          <small style="color: #6b7280; font-size: 11px; margin-top: 4px; display: block;">Must match an approved template name in your Meta WhatsApp Manager.</small>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Language Code</label>
+            <input type="text" id="tpl-lang" value="en_US" placeholder="en_US, ar, etc.">
+          </div>
+          <div class="form-group">
+            <label>Body Variable (Optional)</label>
+            <input type="text" id="tpl-var" placeholder="e.g. Customer Name">
+          </div>
+        </div>
+        <div id="template-status-msg" style="display: none; margin-bottom: 12px; font-size: 0.85rem; padding: 10px; border-radius: 8px;"></div>
+        <button type="submit" class="btn-primary" id="send-template-submit-btn" style="width: 100%;">
+          <i class="fa-solid fa-paper-plane"></i> Send Template Message
+        </button>
+      </form>
+    </div>
+  </div>
+
   <div id="app" class="app" style="display: none;">
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -258,9 +298,13 @@
                 </label>
               </div>
             </div>
-            <div class="chat-history" id="chat-history"></div>
+            <div id="window-warning-banner" style="display: none; padding: 10px 16px; background: rgba(245, 158, 11, 0.15); border-top: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; font-size: 13px; align-items: center; justify-content: space-between;">
+              <span><i class="fa-solid fa-triangle-exclamation"></i> 24-hr customer service window expired. Free-form text will fail.</span>
+              <button id="banner-open-template-btn" style="background: #f59e0b; border: none; color: #000; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;">Send Template</button>
+            </div>
             <div class="chat-input-area">
               <input type="text" id="manual-message" placeholder="Type a manual message (pauses AI)..." disabled>
+              <button type="button" id="open-template-modal-btn" class="btn-template" title="Send pre-approved Meta Template (works even if 24h window closed)" disabled><i class="fa-solid fa-bolt"></i> Template</button>
               <button id="send-btn" disabled><i class="fa-solid fa-paper-plane"></i></button>
             </div>
           </div>
@@ -346,6 +390,137 @@
             <button type="submit" class="btn-primary" id="pdf-upload-btn" style="white-space: nowrap;">Upload PDF</button>
           </form>
           <div id="pdf-upload-status" style="margin-top: 12px; font-size: 0.85rem; color: #10b981; display: none;">✅ PDF parsed and injected into AI brain successfully!</div>
+        </div>
+
+        <!-- COEXISTENCE & MOBILE APP ONBOARDING HUB -->
+        <div class="card" style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.3); background: linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, rgba(10, 8, 21, 0.8) 100%);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Coexistence Mode</span>
+                <h3 style="margin: 0; font-family: 'Outfit', sans-serif;"><i class="fa-solid fa-mobile-screen-button" style="color: #3b82f6;"></i> Link WhatsApp Mobile App (Onboarding)</h3>
+              </div>
+              <p style="color: var(--text-2); font-size: 0.85rem; margin-top: 6px; line-height: 1.4;">
+                Connect your physical phone's WhatsApp Business app directly to this Cloud API. You can reply from your mobile phone while this bot & CRM run simultaneously on the exact same number!
+              </p>
+            </div>
+            <a href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" class="btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 10px 16px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #fff;">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Meta Phone Numbers
+            </a>
+          </div>
+
+          <!-- ONBOARDING TABS / OPTIONS -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 20px;">
+            
+            <!-- OPTION 1: EMBEDDED SIGNUP (ONE-CLICK POPUP) -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: #1877f2; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px;">
+                  <i class="fa-brands fa-facebook-f"></i>
+                </div>
+                <div>
+                  <h4 style="margin: 0; font-size: 0.95rem;">Meta Embedded Signup</h4>
+                  <small style="color: var(--text-3); font-size: 11px;">Official popup onboarding window</small>
+                </div>
+              </div>
+              <p style="color: var(--text-2); font-size: 0.8rem; flex: 1; margin-bottom: 16px; line-height: 1.4;">
+                Launches Meta's official WhatsApp Business App Onboarding popup to pair your phone number in seconds.
+              </p>
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label style="font-size: 11px;">Meta App ID (from developers.facebook.com)</label>
+                <input type="text" id="meta-app-id-input" placeholder="e.g. 123456789012345" style="padding: 10px 12px; font-size: 13px;">
+              </div>
+              
+              <button type="button" id="launch-embedded-signup-btn" class="btn-primary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #1877f2;">
+                <i class="fa-brands fa-facebook"></i> Launch Meta Onboarding
+              </button>
+              <div id="embedded-signup-status" style="margin-top: 10px; font-size: 12px; display: none;"></div>
+            </div>
+
+            <!-- OPTION 2: HANDSET DIRECT LINK (NO SETUP NEEDED) -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: #25d366; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px;">
+                  <i class="fa-brands fa-whatsapp"></i>
+                </div>
+                <div>
+                  <h4 style="margin: 0; font-size: 0.95rem;">Direct Mobile Link (Fastest)</h4>
+                  <small style="color: var(--text-3); font-size: 11px;">From your physical phone app</small>
+                </div>
+              </div>
+              <p style="color: var(--text-2); font-size: 0.8rem; margin-bottom: 12px; line-height: 1.4;">
+                Already have WhatsApp Business on your phone? Link it to your portfolio right now:
+              </p>
+              <ol style="color: var(--text-2); font-size: 0.78rem; line-height: 1.6; padding-left: 18px; margin-bottom: 16px; flex: 1;">
+                <li>Open <strong>WhatsApp Business</strong> on your phone.</li>
+                <li>Tap <strong>Settings → Business Tools → Facebook & Instagram</strong>.</li>
+                <li>Tap <strong>Connect</strong> and choose <strong>Wardah Al-Kuwait</strong>.</li>
+                <li>Approve syncing. Both your mobile and this CRM are now live!</li>
+              </ol>
+              <button type="button" id="verify-coexistence-status-btn" class="btn-primary" style="width: 100%; background: rgba(37, 211, 102, 0.15); border: 1px solid rgba(37, 211, 102, 0.4); color: #25d366;">
+                <i class="fa-solid fa-arrows-rotate"></i> Check Connection Status
+              </button>
+            </div>
+
+          </div>
+          
+          <div style="margin-top: 16px; padding: 12px 16px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2);">
+            <i class="fa-solid fa-circle-info" style="color: #3b82f6; font-size: 16px;"></i>
+            <span><strong>Real-Time Sync:</strong> When you reply to customers directly from your mobile phone, the message is automatically echoed into this CRM log so you never lose conversation history!</span>
+          </div>
+        </div>
+
+        <!-- WHATSAPP API & TEMPLATES CONFIGURATION -->
+        <div class="card" style="margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h3 style="margin: 0; font-family: 'Outfit', sans-serif;"><i class="fa-brands fa-whatsapp" style="color: #25d366;"></i> WhatsApp Cloud API & Template Settings</h3>
+              <p style="color: var(--text-2); font-size: 0.85rem; margin-top: 4px;">Update your Meta Access Token and pre-approved Message Templates directly from your dashboard.</p>
+            </div>
+            <div id="token-status-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; background: rgba(255,255,255,0.05); color: #9ca3af; border: 1px solid var(--border);">
+              <i class="fa-solid fa-circle-question"></i> Not Tested
+            </div>
+          </div>
+
+          <form id="whatsapp-settings-form" class="modern-form">
+            <div class="form-group">
+              <label>WhatsApp Permanent Access Token</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="password" id="setting-wa-token" placeholder="EAAB..." style="font-family: monospace;">
+                <button type="button" id="toggle-token-visibility" style="padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: white; cursor: pointer;"><i class="fa-solid fa-eye"></i></button>
+              </div>
+              <small style="color: var(--text-3); font-size: 11px; margin-top: 4px; display: block;">From your Meta Developer App → WhatsApp → API Setup or System Users.</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>WhatsApp Phone Number ID</label>
+                <input type="text" id="setting-phone-id" placeholder="e.g. 1162096826996318">
+              </div>
+              <div class="form-group">
+                <label>Meta App ID (for Embedded Onboarding)</label>
+                <input type="text" id="setting-meta-app-id" placeholder="e.g. 123456789012345">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Default Re-engagement Template</label>
+                <input type="text" id="setting-tpl-name" placeholder="e.g. hello_world">
+              </div>
+              <div class="form-group">
+                <label>Default Template Language</label>
+                <input type="text" id="setting-tpl-lang" placeholder="en_US" value="en_US">
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+              <button type="submit" class="btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save WhatsApp API Config</button>
+              <button type="button" id="test-token-btn" style="padding: 14px 20px; border-radius: 10px; border: 1px solid rgba(59,130,246,0.4); background: rgba(59,130,246,0.1); color: #60a5fa; font-weight: 600; cursor: pointer;"><i class="fa-solid fa-plug-circle-check"></i> Test Token & Connection</button>
+            </div>
+            <div id="wa-settings-status" style="margin-top: 12px; font-size: 0.85rem; display: none;"></div>
+          </form>
         </div>
 
         <div class="card">

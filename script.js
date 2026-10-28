@@ -277,6 +277,8 @@ async function loadChat(number, element, displayName, botActive) {
   document.getElementById('current-contact').textContent = `Chat with ${displayName}`;
   document.getElementById('manual-message').disabled = false;
   document.getElementById('send-btn').disabled = false;
+  const tplBtn = document.getElementById('open-template-modal-btn');
+  if (tplBtn) tplBtn.disabled = false;
   
   const toggleContainer = document.getElementById('ai-toggle-container');
   toggleContainer.style.display = 'flex';
@@ -290,7 +292,6 @@ async function loadChat(number, element, displayName, botActive) {
         body: JSON.stringify({ bot_active: toggleBtn.checked })
      });
      
-     // Update local state in the UI so if they click away and back it doesn't revert instantly before a refresh
      if (element) {
         element.onclick = () => loadChat(number, element, displayName, toggleBtn.checked);
      }
@@ -300,6 +301,22 @@ async function loadChat(number, element, displayName, botActive) {
     const res = await apiFetch(`/api/chats/${number}`);
     const messages = await res.json();
     const history = document.getElementById('chat-history');
+    
+    // Check 24-hour window status
+    const warningBanner = document.getElementById('window-warning-banner');
+    if (messages && messages.length > 0) {
+      const lastInbound = [...messages].reverse().find(m => m.direction === 'inbound');
+      if (lastInbound && lastInbound.timestamp) {
+        const lastTime = new Date(lastInbound.timestamp).getTime();
+        const diffHours = (Date.now() - lastTime) / (1000 * 60 * 60);
+        if (diffHours >= 24 && warningBanner) {
+          warningBanner.style.display = 'flex';
+        } else if (warningBanner) {
+          warningBanner.style.display = 'none';
+        }
+      }
+    }
+
     if (history.children.length === messages.length) return; 
 
     history.innerHTML = '';
@@ -333,13 +350,107 @@ document.getElementById('send-btn').onclick = async () => {
   });
   
   if (res && !res.ok) {
-    alert("Failed to send message! Your Meta WhatsApp Token may have expired. Please check your Render logs.");
+    const errData = await res.json().catch(() => ({}));
+    if (errData.is_window_expired || errData.code === 131047) {
+      const banner = document.getElementById('window-warning-banner');
+      if (banner) banner.style.display = 'flex';
+      alert("⚠️ 24-Hour Window Expired: WhatsApp blocks free-form text messages after 24 hours of customer inactivity.\n\nPlease click the '⚡ Template' button to re-engage this customer with an approved Meta Template!");
+    } else {
+      alert("Failed to send message: " + (errData.error || "Please check your Meta WhatsApp Token in Settings."));
+    }
   }
 };
 
 document.getElementById('manual-message').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') document.getElementById('send-btn').click();
 });
+
+// TEMPLATE MODAL HANDLERS
+let defaultTemplateName = 'hello_world';
+let defaultTemplateLang = 'en_US';
+
+function openTemplateModal() {
+  if (!currentNumber) {
+    alert("Please select a contact from the inbox first.");
+    return;
+  }
+  document.getElementById('tpl-phone').value = currentNumber;
+  document.getElementById('tpl-name').value = defaultTemplateName || 'hello_world';
+  document.getElementById('tpl-lang').value = defaultTemplateLang || 'en_US';
+  document.getElementById('tpl-var').value = '';
+  document.getElementById('template-status-msg').style.display = 'none';
+  document.getElementById('template-modal').style.display = 'flex';
+}
+
+const openTplBtn = document.getElementById('open-template-modal-btn');
+if (openTplBtn) openTplBtn.onclick = openTemplateModal;
+
+const bannerTplBtn = document.getElementById('banner-open-template-btn');
+if (bannerTplBtn) bannerTplBtn.onclick = openTemplateModal;
+
+const closeTplBtn = document.getElementById('close-template-modal-btn');
+if (closeTplBtn) closeTplBtn.onclick = () => { document.getElementById('template-modal').style.display = 'none'; };
+
+document.getElementById('send-template-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const to = document.getElementById('tpl-phone').value;
+  const template_name = document.getElementById('tpl-name').value.trim();
+  const language_code = document.getElementById('tpl-lang').value.trim();
+  const body_variable = document.getElementById('tpl-var').value.trim();
+  const statusElem = document.getElementById('template-status-msg');
+  const submitBtn = document.getElementById('send-template-submit-btn');
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+
+  try {
+    const res = await apiFetch('/api/send-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, template_name, language_code, body_variable })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      statusElem.style.display = 'block';
+      statusElem.style.background = 'rgba(16,185,129,0.15)';
+      statusElem.style.color = '#10b981';
+      statusElem.style.border = '1px solid rgba(16,185,129,0.3)';
+      statusElem.textContent = '✅ Template message sent successfully!';
+
+      // Append to local chat
+      const history = document.getElementById('chat-history');
+      const div = document.createElement('div');
+      div.className = `message manual`;
+      div.textContent = `📋 [Template: ${template_name}] ${body_variable ? '(' + body_variable + ')' : ''}`;
+      history.appendChild(div);
+      history.scrollTop = history.scrollHeight;
+
+      const banner = document.getElementById('window-warning-banner');
+      if (banner) banner.style.display = 'none';
+
+      setTimeout(() => {
+        document.getElementById('template-modal').style.display = 'none';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send Template Message';
+      }, 1500);
+    } else {
+      statusElem.style.display = 'block';
+      statusElem.style.background = 'rgba(239,68,68,0.15)';
+      statusElem.style.color = '#ef4444';
+      statusElem.style.border = '1px solid rgba(239,68,68,0.3)';
+      statusElem.textContent = '❌ Failed: ' + (data.error || 'Meta API rejected the template. Check template name and language.');
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send Template Message';
+    }
+  } catch (err) {
+    statusElem.style.display = 'block';
+    statusElem.style.color = '#ef4444';
+    statusElem.textContent = '❌ Connection error.';
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send Template Message';
+  }
+};
 
 // TAB 3: CONTACTS CRM
 async function fetchCRMContacts() {
@@ -414,8 +525,243 @@ async function fetchSettings() {
   const res = await apiFetch('/api/settings');
   if (!res) return;
   const data = await res.json();
-  document.getElementById('setting-prompt').value = data.system_prompt;
+  document.getElementById('setting-prompt').value = data.system_prompt || '';
+  
+  if (data.whatsapp_token) {
+    document.getElementById('setting-wa-token').value = data.whatsapp_token;
+    const badge = document.getElementById('token-status-badge');
+    if (badge) {
+      badge.innerHTML = '<i class="fa-solid fa-key" style="color:#60a5fa;"></i> Token Stored';
+      badge.style.borderColor = 'rgba(59,130,246,0.3)';
+    }
+  }
+  if (data.whatsapp_phone_id) {
+    document.getElementById('setting-phone-id').value = data.whatsapp_phone_id;
+  }
+  if (data.default_template_name) {
+    document.getElementById('setting-tpl-name').value = data.default_template_name;
+    defaultTemplateName = data.default_template_name;
+  }
+  if (data.default_template_lang) {
+    document.getElementById('setting-tpl-lang').value = data.default_template_lang;
+    defaultTemplateLang = data.default_template_lang;
+  }
+  if (data.meta_app_id) {
+    const metaInput = document.getElementById('setting-meta-app-id');
+    if (metaInput) metaInput.value = data.meta_app_id;
+    const onboardInput = document.getElementById('meta-app-id-input');
+    if (onboardInput) onboardInput.value = data.meta_app_id;
+  }
 }
+
+// Toggle token visibility
+document.getElementById('toggle-token-visibility').onclick = () => {
+  const input = document.getElementById('setting-wa-token');
+  const icon = document.querySelector('#toggle-token-visibility i');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.className = 'fa-solid fa-eye-slash';
+  } else {
+    input.type = 'password';
+    icon.className = 'fa-solid fa-eye';
+  }
+};
+
+// WhatsApp Settings Form
+document.getElementById('whatsapp-settings-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const token = document.getElementById('setting-wa-token').value.trim();
+  const phoneId = document.getElementById('setting-phone-id').value.trim();
+  const tplName = document.getElementById('setting-tpl-name').value.trim();
+  const tplLang = document.getElementById('setting-tpl-lang').value.trim();
+  const metaAppId = document.getElementById('setting-meta-app-id') ? document.getElementById('setting-meta-app-id').value.trim() : '';
+  const statusElem = document.getElementById('wa-settings-status');
+
+  try {
+    const res = await apiFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        whatsapp_token: token,
+        whatsapp_phone_id: phoneId,
+        default_template_name: tplName,
+        default_template_lang: tplLang,
+        meta_app_id: metaAppId
+      })
+    });
+
+    if (res.ok) {
+      defaultTemplateName = tplName || 'hello_world';
+      defaultTemplateLang = tplLang || 'en_US';
+      const onboardInput = document.getElementById('meta-app-id-input');
+      if (onboardInput && metaAppId) onboardInput.value = metaAppId;
+
+      statusElem.style.display = 'block';
+      statusElem.style.color = '#10b981';
+      statusElem.textContent = '✅ WhatsApp API settings and templates saved successfully!';
+      setTimeout(() => { statusElem.style.display = 'none'; }, 4000);
+    } else {
+      statusElem.style.display = 'block';
+      statusElem.style.color = '#ef4444';
+      statusElem.textContent = '❌ Failed to save settings.';
+    }
+  } catch (err) {
+    statusElem.style.display = 'block';
+    statusElem.style.color = '#ef4444';
+    statusElem.textContent = '❌ Network error.';
+  }
+};
+
+// Check Coexistence Status Button
+const verifyCoexBtn = document.getElementById('verify-coexistence-status-btn');
+if (verifyCoexBtn) {
+  verifyCoexBtn.onclick = () => {
+    document.getElementById('test-token-btn').click();
+  };
+}
+
+// Meta Embedded Signup Onboarding Launcher
+const launchOnboardBtn = document.getElementById('launch-embedded-signup-btn');
+if (launchOnboardBtn) {
+  launchOnboardBtn.onclick = async () => {
+    const appIdInput = document.getElementById('meta-app-id-input');
+    const appId = appIdInput ? appIdInput.value.trim() : '';
+    const statusDiv = document.getElementById('embedded-signup-status');
+
+    if (!appId) {
+      alert("⚠️ Meta App ID Required:\n\nPlease enter your Meta App ID (from developers.facebook.com) in the box above to launch official Embedded Signup.\n\nTip: You can also connect immediately via Option 2 using the WhatsApp Business app directly on your phone!");
+      if (appIdInput) appIdInput.focus();
+      return;
+    }
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.color = '#60a5fa';
+    statusDiv.textContent = '⏳ Loading official Meta SDK...';
+
+    // Load Facebook SDK dynamically if not present
+    if (!window.FB) {
+      await new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = 'https://connect.facebook.net/en_US/sdk.js';
+        script.async = true;
+        script.defer = true;
+        script.onload = resolve;
+        document.head.appendChild(script);
+      });
+    }
+
+    try {
+      window.FB.init({
+        appId: appId,
+        cookie: true,
+        xfbml: true,
+        version: 'v21.0'
+      });
+
+      // Listen for message events from Meta's Embedded Signup popup
+      const sessionListener = async (event) => {
+        if (event.origin && event.origin.includes('facebook.com')) {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'WA_EMBEDDED_SIGNUP') {
+              if (data.event === 'FINISH' && data.data) {
+                const phoneId = data.data.phone_number_id;
+                const wabaId = data.data.waba_id;
+                if (phoneId) {
+                  document.getElementById('setting-phone-id').value = phoneId;
+                  await apiFetch('/api/onboarding/save-coexistence', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone_number_id: phoneId, meta_app_id: appId })
+                  });
+                }
+              }
+            }
+          } catch(e) {}
+        }
+      };
+      window.removeEventListener('message', sessionListener);
+      window.addEventListener('message', sessionListener);
+
+      statusDiv.textContent = '🚀 Opening Meta authorization popup...';
+
+      window.FB.login(async (response) => {
+        if (response.authResponse) {
+          const code = response.authResponse.code;
+          statusDiv.style.color = '#10b981';
+          statusDiv.textContent = '✅ Coexistence onboarding authorized by Meta! Testing connection...';
+
+          await apiFetch('/api/onboarding/save-coexistence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meta_app_id: appId, code: code })
+          });
+
+          setTimeout(() => {
+            document.getElementById('test-token-btn').click();
+          }, 1500);
+        } else {
+          statusDiv.style.color = '#f59e0b';
+          statusDiv.textContent = 'ℹ️ Onboarding window closed.';
+        }
+      }, {
+        config_id: '',
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: 'whatsapp_business_app_onboarding',
+          sessionInfoVersion: '3'
+        }
+      });
+
+    } catch (err) {
+      statusDiv.style.color = '#ef4444';
+      statusDiv.textContent = '❌ Failed to initialize Meta SDK: ' + err.message;
+    }
+  };
+}
+
+// Test Token Connection
+document.getElementById('test-token-btn').onclick = async () => {
+  const btn = document.getElementById('test-token-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing Meta API...';
+  btn.disabled = true;
+
+  const token = document.getElementById('setting-wa-token').value.trim();
+  const phoneId = document.getElementById('setting-phone-id').value.trim();
+  const badge = document.getElementById('token-status-badge');
+
+  try {
+    const res = await apiFetch('/api/test-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, phone_id: phoneId })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data.valid) {
+      badge.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981;"></i> Active: ${data.display_phone_number} (Quality: ${data.quality_rating})`;
+      badge.style.borderColor = 'rgba(16,185,129,0.3)';
+      badge.style.background = 'rgba(16,185,129,0.1)';
+      badge.style.color = '#10b981';
+      alert(`✅ Meta Cloud API Connection Successful!\n\nPhone: ${data.display_phone_number}\nVerified Name: ${data.verified_name}\nQuality Rating: ${data.quality_rating}\n\nYour API Token is working perfectly.`);
+    } else {
+      badge.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color:#ef4444;"></i> Invalid Token`;
+      badge.style.borderColor = 'rgba(239,68,68,0.3)';
+      badge.style.background = 'rgba(239,68,68,0.1)';
+      badge.style.color = '#ef4444';
+      alert("❌ Token Verification Failed:\n\n" + (data.error || "Meta rejected the access token or phone ID."));
+    }
+  } catch (err) {
+    alert("❌ Error connecting to test endpoint.");
+  }
+
+  btn.innerHTML = originalText;
+  btn.disabled = false;
+};
+
 document.getElementById('settings-form').onsubmit = async (e) => {
   e.preventDefault();
   const prompt = document.getElementById('setting-prompt').value;
@@ -424,7 +770,7 @@ document.getElementById('settings-form').onsubmit = async (e) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ system_prompt: prompt })
   });
-  alert('Settings Saved!');
+  alert('System Prompt Saved!');
 };
 
 document.getElementById('pdf-upload-form').onsubmit = async (e) => {

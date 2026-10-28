@@ -112,6 +112,39 @@ async function getSystemPrompt(accountId) {
   } catch (err) { return "You are a helpful AI assistant."; }
 }
 
+async function getWhatsAppCredentials(accountId) {
+  let token = process.env.WHATSAPP_TOKEN || '';
+  let phoneId = process.env.PHONE_NUMBER_ID || "1162096826996318";
+  let defaultTemplate = "hello_world";
+  let defaultLang = "en_US";
+  let metaAppId = process.env.META_APP_ID || "";
+
+  try {
+    const res = await pool.query(
+      `SELECT key, value FROM settings WHERE account_id = $1 AND key IN ('whatsapp_token', 'whatsapp_phone_id', 'default_template_name', 'default_template_lang', 'meta_app_id')`,
+      [accountId]
+    );
+    res.rows.forEach(r => {
+      if (r.key === 'whatsapp_token' && r.value && r.value.trim() !== '') token = r.value.trim();
+      if (r.key === 'whatsapp_phone_id' && r.value && r.value.trim() !== '') phoneId = r.value.trim();
+      if (r.key === 'default_template_name' && r.value && r.value.trim() !== '') defaultTemplate = r.value.trim();
+      if (r.key === 'default_template_lang' && r.value && r.value.trim() !== '') defaultLang = r.value.trim();
+      if (r.key === 'meta_app_id' && r.value && r.value.trim() !== '') metaAppId = r.value.trim();
+    });
+
+    if (!phoneId) {
+      const acc = await pool.query(`SELECT whatsapp_phone_id FROM accounts WHERE id = $1`, [accountId]);
+      if (acc.rows.length > 0 && acc.rows[0].whatsapp_phone_id) {
+        phoneId = acc.rows[0].whatsapp_phone_id;
+      }
+    }
+  } catch (e) {
+    console.error("Error fetching WhatsApp credentials:", e.message);
+  }
+
+  return { token, phoneNumberId: phoneId, defaultTemplate, defaultLang, metaAppId };
+}
+
 let cachedModels = [];
 async function getValidModelsList() {
   if (cachedModels.length > 0) return cachedModels;
@@ -220,15 +253,78 @@ app.get('/api/chats/:number', authenticateJWT, async (req, res) => {
 app.post('/api/send', authenticateJWT, async (req, res) => {
   const accountId = req.user.accountId;
   const { to, message } = req.body;
-  if (!to || !message) return res.status(400).json({ error: "Missing data" });
+  if (!to || !message) return res.status(400).json({ error: "Missing recipient or message" });
   try {
-    const accResult = await pool.query(`SELECT whatsapp_phone_id FROM accounts WHERE id = $1`, [accountId]);
-    const phoneNumberId = accResult.rows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID || "1162096826996318";
+    const creds = await getWhatsAppCredentials(accountId);
+    if (!creds.token) return res.status(400).json({ error: "WhatsApp Access Token is not configured. Please add it in Settings." });
     
-    await axios({ method: 'POST', url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }, data: { messaging_product: 'whatsapp', to: to, type: 'text', text: { body: message } } });
+    await axios({ 
+      method: 'POST', 
+      url: `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`, 
+      headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' }, 
+      data: { messaging_product: 'whatsapp', to: to, type: 'text', text: { body: message } } 
+    });
     await logMessage(accountId, to, 'manual', message);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    const fbError = err.response?.data?.error;
+    if (fbError && (fbError.code === 131047 || fbError.error_subcode === 131047 || (fbError.message && fbError.message.includes('24 hours')))) {
+      return res.status(400).json({ 
+        error: "24-hour customer window has expired. WhatsApp blocks free-form text. Please use 'Send Template' to re-open the conversation.",
+        code: 131047,
+        is_window_expired: true
+      });
+    }
+    const errMsg = fbError?.message || err.message;
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+// Send Meta Approved Template
+app.post('/api/send-template', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  const { to, template_name, language_code, body_variable } = req.body;
+  if (!to || !template_name) return res.status(400).json({ error: "Recipient phone number and template name are required." });
+
+  try {
+    const creds = await getWhatsAppCredentials(accountId);
+    if (!creds.token) return res.status(400).json({ error: "WhatsApp Access Token is not configured. Please add it in Settings." });
+
+    const lang = language_code || creds.defaultLang || "en_US";
+    const payload = {
+      messaging_product: "whatsapp",
+      to: to,
+      type: "template",
+      template: {
+        name: template_name,
+        language: { code: lang }
+      }
+    };
+
+    if (body_variable && body_variable.trim() !== '') {
+      payload.template.components = [
+        {
+          type: "body",
+          parameters: [{ type: "text", text: body_variable.trim() }]
+        }
+      ];
+    }
+
+    const response = await axios({
+      method: 'POST',
+      url: `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`,
+      headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
+      data: payload
+    });
+
+    const logText = body_variable ? `[Template: ${template_name}] Variable: ${body_variable}` : `[Template: ${template_name}]`;
+    await logMessage(accountId, to, 'manual', logText);
+    res.json({ success: true, messageId: response.data.messages?.[0]?.id });
+  } catch (err) {
+    const errObj = err.response?.data?.error || err.response?.data || err.message;
+    const msg = typeof errObj === 'object' ? (errObj.message || JSON.stringify(errObj)) : errObj;
+    res.status(500).json({ error: msg });
+  }
 });
 
 app.get('/api/contacts', authenticateJWT, async (req, res) => {
@@ -323,16 +419,93 @@ app.post('/api/appointments', authenticateJWT, async (req, res) => {
 app.get('/api/settings', authenticateJWT, async (req, res) => {
   const accountId = req.user.accountId;
   const prompt = await getSystemPrompt(accountId);
-  res.json({ system_prompt: prompt });
+  const creds = await getWhatsAppCredentials(accountId);
+  res.json({ 
+    system_prompt: prompt,
+    whatsapp_token: creds.token,
+    whatsapp_phone_id: creds.phoneNumberId,
+    default_template_name: creds.defaultTemplate,
+    default_template_lang: creds.defaultLang,
+    meta_app_id: creds.metaAppId
+  });
 });
 
 app.post('/api/settings', authenticateJWT, async (req, res) => {
   const accountId = req.user.accountId;
-  const { system_prompt } = req.body;
+  const { system_prompt, whatsapp_token, whatsapp_phone_id, default_template_name, default_template_lang, meta_app_id } = req.body;
   try {
-    await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('system_prompt', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, system_prompt]);
+    if (system_prompt !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('system_prompt', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, system_prompt]);
+    }
+    if (whatsapp_token !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('whatsapp_token', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, whatsapp_token.trim()]);
+    }
+    if (whatsapp_phone_id !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('whatsapp_phone_id', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, whatsapp_phone_id.trim()]);
+      await pool.query(`UPDATE accounts SET whatsapp_phone_id = $1 WHERE id = $2`, [whatsapp_phone_id.trim(), accountId]);
+    }
+    if (default_template_name !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('default_template_name', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, default_template_name.trim()]);
+    }
+    if (default_template_lang !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('default_template_lang', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, default_template_lang.trim()]);
+    }
+    if (meta_app_id !== undefined) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('meta_app_id', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, meta_app_id.trim()]);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Coexistence Onboarding Save Endpoint
+app.post('/api/onboarding/save-coexistence', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  const { phone_number_id, meta_app_id, token } = req.body;
+  try {
+    if (phone_number_id) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('whatsapp_phone_id', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, phone_number_id.trim()]);
+      await pool.query(`UPDATE accounts SET whatsapp_phone_id = $1 WHERE id = $2`, [phone_number_id.trim(), accountId]);
+    }
+    if (meta_app_id) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('meta_app_id', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, meta_app_id.trim()]);
+    }
+    if (token) {
+      await pool.query(`INSERT INTO settings (key, account_id, value) VALUES ('whatsapp_token', $1, $2) ON CONFLICT (key, account_id) DO UPDATE SET value = EXCLUDED.value`, [accountId, token.trim()]);
+    }
+    res.json({ success: true, message: "Coexistence settings linked successfully!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test Meta WhatsApp Token Endpoint
+app.post('/api/test-token', authenticateJWT, async (req, res) => {
+  const accountId = req.user.accountId;
+  const { token, phone_id } = req.body;
+  try {
+    const creds = await getWhatsAppCredentials(accountId);
+    const testToken = (token && token.trim() !== '') ? token.trim() : creds.token;
+    const testPhoneId = (phone_id && phone_id.trim() !== '') ? phone_id.trim() : creds.phoneNumberId;
+
+    if (!testToken) return res.status(400).json({ valid: false, error: "No WhatsApp token provided or saved." });
+    if (!testPhoneId) return res.status(400).json({ valid: false, error: "No Phone Number ID provided or saved." });
+
+    const metaRes = await axios.get(`https://graph.facebook.com/v21.0/${testPhoneId}`, {
+      headers: { Authorization: `Bearer ${testToken}` }
+    });
+
+    res.json({
+      valid: true,
+      display_phone_number: metaRes.data.display_phone_number || testPhoneId,
+      verified_name: metaRes.data.verified_name || "Verified WhatsApp Business",
+      quality_rating: metaRes.data.quality_rating || "GREEN / GOOD",
+      id: metaRes.data.id
+    });
+  } catch (err) {
+    const fbError = err.response?.data?.error;
+    const errMsg = fbError?.message || err.message;
+    res.status(400).json({ valid: false, error: errMsg });
+  }
 });
 
 // PDF Knowledge Base Upload Endpoint
@@ -369,32 +542,56 @@ app.post('/webhook', async (req, res) => {
   const body = req.body;
 
   if (body.object) {
-    if (body.entry && body.entry[0].changes && body.entry[0].changes[0] && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
-      
-      const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
-      const from = body.entry[0].changes[0].value.messages[0].from; 
-      const msgObj = body.entry[0].changes[0].value.messages[0];
-      let msgBody = "Received a non-text message";
-      let aiInput = null;
+    if (body.entry && body.entry[0].changes && body.entry[0].changes[0]) {
+      const changeVal = body.entry[0].changes[0].value;
+      const phoneNumberId = changeVal.metadata ? changeVal.metadata.phone_number_id : null;
 
-      if (msgObj.type === 'text') {
-        msgBody = msgObj.text.body;
-      } else if (msgObj.type === 'interactive' && msgObj.interactive.type === 'button_reply') {
-        msgBody = msgObj.interactive.button_reply.title;
-      } else if (msgObj.type === 'audio' || msgObj.type === 'voice') {
-        msgBody = "🎤 [Voice Note Received]";
-      } else if (msgObj.type === 'image') {
-        msgBody = "📷 [Image Received]";
+      // Handle mobile app message echoes (Coexistence mode)
+      const echoes = changeVal.message_echoes || changeVal.smb_message_echoes;
+      if (echoes && echoes.length > 0) {
+        res.sendStatus(200);
+        try {
+          const accResult = await pool.query(`SELECT id FROM accounts WHERE whatsapp_phone_id = $1`, [phoneNumberId]);
+          const accountId = accResult.rows.length > 0 ? accResult.rows[0].id : 1;
+          for (const echo of echoes) {
+            const to = echo.to;
+            let echoText = echo.text ? echo.text.body : "[Media from mobile]";
+            if (echo.type === 'image') echoText = "📷 [Image sent from mobile app]";
+            if (echo.type === 'audio' || echo.type === 'voice') echoText = "🎤 [Voice note sent from mobile app]";
+            await logMessage(accountId, to, 'manual', `📱 [Mobile App] ${echoText}`);
+          }
+        } catch(err) {
+          console.error("Echo log error:", err.message);
+        }
+        return;
       }
 
-      res.sendStatus(200); 
+      // Handle regular inbound messages from customer
+      if (changeVal.messages && changeVal.messages[0]) {
+        const from = changeVal.messages[0].from; 
+        const msgObj = changeVal.messages[0];
+        let msgBody = "Received a non-text message";
+        let aiInput = null;
 
-      try {
-        // Resolve Account based on incoming phone_number_id
-        const accResult = await pool.query(`SELECT id FROM accounts WHERE whatsapp_phone_id = $1`, [phoneNumberId]);
-        const accountId = accResult.rows.length > 0 ? accResult.rows[0].id : 1;
+        if (msgObj.type === 'text') {
+          msgBody = msgObj.text.body;
+        } else if (msgObj.type === 'interactive' && msgObj.interactive.type === 'button_reply') {
+          msgBody = msgObj.interactive.button_reply.title;
+        } else if (msgObj.type === 'audio' || msgObj.type === 'voice') {
+          msgBody = "🎤 [Voice Note Received]";
+        } else if (msgObj.type === 'image') {
+          msgBody = "📷 [Image Received]";
+        }
 
-        await logMessage(accountId, from, 'inbound', msgBody);
+        res.sendStatus(200); 
+
+        try {
+          // Resolve Account based on incoming phone_number_id
+          const accResult = await pool.query(`SELECT id FROM accounts WHERE whatsapp_phone_id = $1`, [phoneNumberId]);
+          const accountId = accResult.rows.length > 0 ? accResult.rows[0].id : 1;
+          const creds = await getWhatsAppCredentials(accountId);
+
+          await logMessage(accountId, from, 'inbound', msgBody);
 
         const contactCheck = await pool.query(`SELECT bot_active FROM contacts WHERE phone_number = $1 AND account_id = $2`, [from, accountId]);
         const botActive = contactCheck.rows.length > 0 ? contactCheck.rows[0].bot_active : true;
@@ -443,10 +640,10 @@ app.post('/webhook', async (req, res) => {
         if (msgObj.type === 'audio' || msgObj.type === 'voice' || msgObj.type === 'image') {
           try {
             const mediaObj = msgObj.type === 'image' ? msgObj.image : (msgObj.type === 'voice' ? msgObj.voice : msgObj.audio);
-            const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${mediaObj.id}`, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const mediaRes = await axios.get(`https://graph.facebook.com/v21.0/${mediaObj.id}`, { headers: { Authorization: `Bearer ${creds.token}` } });
             const mediaUrl = mediaRes.data.url;
             
-            const mediaDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+            const mediaDataRes = await axios.get(mediaUrl, { responseType: 'arraybuffer', headers: { Authorization: `Bearer ${creds.token}` } });
             const base64Media = Buffer.from(mediaDataRes.data, 'binary').toString('base64');
             
             const promptText = msgObj.type === 'image' 
@@ -513,17 +710,18 @@ app.post('/webhook', async (req, res) => {
           payloadData = { messaging_product: 'whatsapp', to: from, type: 'text', text: { body: cleanedResponse } };
         }
 
-        await axios({ method: 'POST', url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }, data: payloadData });
+        await axios({ method: 'POST', url: `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`, headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' }, data: payloadData });
         await logMessage(accountId, from, 'outbound', aiResponse); // aiResponse retains the unmodified text (except LEAD:HOT was removed)
       } catch (error) {
         console.error('Error processing AI:', error.message);
       }
       return; 
     }
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
   }
+  res.sendStatus(200);
+} else {
+  res.sendStatus(404);
+}
 });
 
 // -----------------------------------------
@@ -532,8 +730,8 @@ app.post('/webhook', async (req, res) => {
 cron.schedule('0 * * * *', async () => {
   console.log("Running hourly check for Hot Leads follow-ups...");
   try {
-    // Find Hot leads who haven't had a message in the last 48 hours, and haven't received a follow-up yet.
-    // Also ensuring bot_active is true.
+    // Find Hot leads whose last message was between 20 and 23 hours ago.
+    // This ensures our automated follow-up arrives safely BEFORE the strict 24-hour customer window closes!
     const leads = await pool.query(`
       SELECT c.phone_number, c.account_id, c.name, a.whatsapp_phone_id
       FROM contacts c
@@ -541,16 +739,20 @@ cron.schedule('0 * * * *', async () => {
       WHERE c.lead_score = 'Hot' 
         AND c.bot_active = true 
         AND c.followup_sent = 0
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM messages m 
           WHERE m.phone_number = c.phone_number 
             AND m.account_id = c.account_id 
-            AND m.timestamp > NOW() - INTERVAL '48 hours'
+            AND m.timestamp <= NOW() - INTERVAL '20 hours'
+            AND m.timestamp >= NOW() - INTERVAL '23 hours'
         )
     `);
 
     for (const lead of leads.rows) {
       try {
+        const creds = await getWhatsAppCredentials(lead.account_id);
+        if (!creds.token) continue;
+
         const sysPrompt = await getSystemPrompt(lead.account_id);
         const prompt = sysPrompt + "\n\nCRITICAL INSTRUCTION: Generate a very short, friendly check-in message for this user. DO NOT offer any discounts or deals unless explicitly told to. Just ask if they have any more questions about the products they were looking at.";
         
@@ -568,8 +770,12 @@ cron.schedule('0 * * * *', async () => {
         }
         
         if (aiResponse) {
-          const phoneNumberId = lead.whatsapp_phone_id || process.env.PHONE_NUMBER_ID || "1162096826996318";
-          await axios({ method: 'POST', url: `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }, data: { messaging_product: 'whatsapp', to: lead.phone_number, type: 'text', text: { body: aiResponse } } });
+          await axios({ 
+            method: 'POST', 
+            url: `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`, 
+            headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' }, 
+            data: { messaging_product: 'whatsapp', to: lead.phone_number, type: 'text', text: { body: aiResponse } } 
+          });
           await logMessage(lead.account_id, lead.phone_number, 'outbound', aiResponse);
           await pool.query(`UPDATE contacts SET followup_sent = 1 WHERE phone_number = $1 AND account_id = $2`, [lead.phone_number, lead.account_id]);
           console.log(`Sent automated follow-up to ${lead.phone_number}`);
